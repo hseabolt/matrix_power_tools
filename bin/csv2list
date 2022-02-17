@@ -1,0 +1,127 @@
+#!/usr/bin/perl
+
+# csv2list.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Convert a comma-separated (csv) file into a list where each value is on a separate line with the appropriate rowname
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $isep;
+my $osep;
+
+sub usage {
+	my $usage = "csv2list.pl\n
+	PURPOSE: Convert a comma-separated (csv) file into a list where each value is on a separate line with the appropriate rowname.
+			By default, the rowname is the first element in the csv data if rownames are not included in the original input.
+	\n
+	USAGE:	csv2list.pl -i csv.list -v 5 -o data.list
+	-i		input matrix file
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-o 		output file name
+	-si 	STR; input data separator ( Default: , )
+	-so 	STR; output data separator ( Default: newline || \n )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'ncols|c=i' => \$cns,
+			'nrows|r=i' => \$rns,
+			'isep|si=s' => \$isep,
+			'osep|so=s' => \$osep,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$isep = ( $isep && $isep ne "," )? $isep : ",";
+$osep = ( $osep && $osep =~ "\n" )? $osep : ( $osep && $osep =~ "\t" )? $osep : "\n";
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Loop over the lines of the incoming data
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, go ahead and print those
+	if ( $cns == 1 && $. == 1 )		{
+		my @colnames = split("$isep", $_);
+		print $fhout join("$osep", @colnames), "\n";
+		next;
+	}
+	
+	# Now operate element-wise over the rows and print
+	my @row = split("$isep", $_);
+	my $rowname = $row[0];
+	
+	# If there is nothing to split up here, we still want that data, so print it directly (it will all be in the $rowname variable)
+	if ( scalar @row == 1 )		{
+		print "$rowname\n";
+		next;
+	}
+	
+	# Otherwise, we have multiple lines of data to format and print
+	my @rown = split("\t", $rowname);
+	shift @row;
+	@row = ( @rown, @row );
+	for ( my $i=1; $i < scalar @row; $i++ ) 	{
+		if ( $osep eq "\n" )	{
+			print $fhout $row[0], "\t", $row[$i], "\n";
+		}
+		else 	{
+			print $fhout join("$osep", $row[0], $row[$i]), "\n";
+		}
+	}
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;

@@ -1,0 +1,149 @@
+#!/usr/bin/perl
+
+# diagonal.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Replaces the primary diagonal values of a matrix with a given vector.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns;
+my $rns;
+my $sep;
+my $vector;
+
+sub usage {
+	my $usage = "diagonal.pl\n
+	PURPOSE: Replaces the primary diagonal values of a matrix with a given vector.
+	\n
+	USAGE:	diagonal.pl -r 3 -c 4 -o matrix.tab
+	-i		input matrix file
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-o 		output file name
+	-s 		STR; input data separator ( Default: tab )
+	-v 		CSV or FILE; a vector of values to set as the diagonal of the matrix. If using a file, one value per line.
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'vector|v=s' => \$vector,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0)? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+# Get the diagonal vector
+my @diagonal;
+if ( $vector && -e $vector )	{
+	open(LIST, "$vector") or die "$!\n";
+		@diagonal = <LIST>;
+	close LIST;
+}
+elsif ( $vector ne "" )	{
+	@diagonal = split(",", $vector);
+}
+
+chomp $_ foreach (@diagonal);
+warn "WARNING:: No valid values given for the diagonal vector!  Random float values will be used instead\n" if ( scalar @diagonal == 0 );
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Construct a 2D AoA matrix from the incoming data
+my $i=0;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, go ahead and print those
+	if ( $cns == 1 && $. == 1 )		{
+		print $fhout "$_\n";
+		next;
+	}
+	
+	# Now operate on the rows
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	$row[$i] = ( defined($diagonal[$i]) )? $diagonal[$i] : sprintf("%3.4f", rand(10));
+	if ( $rns == 1 )	{	print $fhout "$rowname$sep", join("$sep", @row), "\n";		}
+	else				{	print $fhout join("$sep", @row), "\n";						}
+	$i++;
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

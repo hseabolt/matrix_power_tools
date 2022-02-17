@@ -1,0 +1,151 @@
+#!/usr/bin/perl
+
+# erdos-renyi.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Generates an random graph following the G(n,p) Erdos-Renyi (and Gilbert) model to randomly produce a graph with n vertices.
+# Each edge is generated with uniform probability p.
+# The program randgraph is an alias of this program.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $n;
+my $p;
+my $directed = 0;
+my $labels = 0;
+my $sep;
+
+sub usage {
+	my $usage = "erdos-renyi.pl\n
+	PURPOSE:  Generates an random graph following the G(n,p) Erdos-Renyi (and Gilbert) model to randomly produce a graph with n vertices.
+			Each edge is generated with uniform probability p.
+	\n
+	USAGE:	erdos-renyi.pl -n 3 -p 4 -o adj.tab
+	-n 		INT; number of vertices [ Default: 3 ]
+	-c 		FLT; probability of an edge being present? Must be between 0 and 1.0 [ Default 0.5 ]
+	-o 		output file name
+	
+	== OPTIONAL CONTROLS ==
+	-s 		STR; data separator for the output adjacency matrix ( Default: tab )
+	-d		INT flag; produce a DIRECTED graph? [ Default: OFF -- default is to generate bidirectional random graphs ]
+	-l 		INT flag; label the nodes in the resulting adjacency matrix? [ Default: OFF ]
+\n";
+	print $usage;
+}
+
+GetOptions(	'out|o=s' => \$output,
+			'nodes|n=i' => \$n,
+			'probability|p=f' => \$p,
+			'directed|d=i' => \$directed,
+			'labels|l=i' => \$labels,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$n = ( $n && $n >= 1 )? $n : 3;
+$p = ( $p && $p >= 0.0 && $p <= 1.0 )? $p : 0.5;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$directed = ( $directed == 0 )? 0 : 1;
+$labels = ( $labels == 0 )? 0 : 1;
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Generate the random graph
+my @G = ();
+if ( $directed == 1 )	{
+	for ( my $i=0; $i < $n; $i++ )	{
+		for ( my $j=0; $j < $n; $j++ )	{
+			$G[$i]->[$j] = ( rand() <= $p )? 1 : 0;
+		}
+	}
+}
+else 	{
+	for ( my $i=0; $i < $n; $i++ )	{
+		for ( my $j=$i; $j < $n; $j++ )	{
+			$G[$i]->[$j] = ( rand() <= $p )? 1 : 0;
+			$G[$j]->[$i] = $G[$i]->[$j];
+		}
+	}
+}
+
+# Generate a set of lables if we want to use them
+my @labels;
+if ( $labels == 1 )	{
+	for ( my $l=0; $l < $n; $l++ )	{
+		my $tick = $l+1;
+		$labels[$l] = "V" . "$tick";
+	}
+}
+
+# Print the resulting graph
+print $fhout join("$sep", @labels), "\n" if ( $labels == 1 );
+for ( my $i=0; $i < scalar @G; $i++ )	{
+	if ( $labels == 1 )		{	print $fhout join("$sep", $labels[$i], @{$G[$i]}), "\n";	}
+	else 					{	print $fhout join("$sep", @{$G[$i]}), "\n";					}
+}
+close $fhout if ( $succout );
+
+
+exit;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,102 @@
+#!/usr/bin/perl
+
+# cardinality.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Computes the cardinality (size) of an input Set (can be a Multiset).
+# WARNING: Any headers should be removed prior to passing incoming data to this script. 
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $multiset;
+
+sub usage {
+	my $usage = "cardinality.pl v0.1.0\n
+	PURPOSE: Computes the cardinality (size) of an input Set (can be a Multiset).
+			WARNING: Any headers should be removed prior to passing incoming data to this script.
+	\n
+	USAGE:	cardinality.pl v0.1.0 -A Set -B setB -o cardinality.list
+	-i		input set in LIST format, one element per line
+	-o 		output file name
+	-m 		(Optional) INT flag; treat set as a Multiset? [Default OFF]
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'multiset|m=i' => \$multiset,
+) or die usage();
+
+# Parameter setups
+$multiset = ( $multiset && $multiset == 1 )? 1 : 0;
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(SET, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *SET if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on the input line-by-line
+# Woe to ye who include column or row names in your Sets,
+#   those names will end up in the union as elements.
+my %Set;
+while ( <$fh> )		{
+	chomp $_;
+	$Set{$_} = ( $multiset == 1 )? $Set{$_} += 1 : 1;
+}
+close $fh if ( $succin );
+
+# Print the cardinality
+print $fhout sum(values %Set), "\n";
+close $fhout if ( $succout );
+exit;
+
+####################### SUBROUTINES ##############################
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

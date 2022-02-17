@@ -1,0 +1,126 @@
+#!/usr/bin/perl
+
+# cumMean.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Computes the mean of each means in an input matrix.  Outputs a vector of mean.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns  = 1;
+my $rns = 1;
+my $sep;
+
+sub usage {
+	my $usage = "cumMean.pl\n
+	PURPOSE: Computes the mean of an input matrix.  Outputs the mean.
+	\n
+	USAGE:	cumMean.pl -i NxM.tab -o mean.txt
+	-i		input matrix file
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Construct a 2D AoA matrix from the incoming data
+my @headers;
+my @means;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, go ahead and print those
+	if ( $cns == 1 && $. == 1 )		{
+		my $headline = $_;
+		@headers = split("$sep", $headline);
+		next;
+	}
+	
+	# Now operate on the rows
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )		{
+		my $rowname = shift @row;
+	}
+	
+	# Add the new row onto the matrix
+	push @means, $_ foreach ( @row );
+}
+close $fh if ( $succin );
+
+print $fhout sprintf("%3.4f", mean(@means)), "\n";
+close $fhout if ( $succout );
+
+exit;
+# Calculates the mean of a list
+sub mean	{ 
+	return sum(@_)/@_;
+}
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+

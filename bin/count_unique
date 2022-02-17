@@ -1,0 +1,133 @@
+#!/usr/bin/perl
+
+# count_unique.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 9-22-2021
+
+# SYNOPSIS:
+# Prints the unique elements in an incoming data matrix (by row), the column they are unique to, and the matrix cell's value.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $ignore;
+my $ignore_zero = 1;
+
+sub usage {
+	my $usage = "count_unique.pl\n
+	PURPOSE: Prints the unique elements in an incoming data matrix (by row), the column they are unique to, and the matrix cell's value.
+	\n
+	USAGE:	count_unique.pl -i NxM.tab -o count_unique.txt
+	-i		input matrix file
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+	-z		INT flag; do not count elements with a value of zero? [ Default: ON ]
+	-n 		STR; ignore elements matching this value (e.g. 0, NA)? [ Default: NA ]
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'ignore_zero|z=i' => \$ignore_zero,	
+			'ignore|n=s' => \$ignore,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$ignore_zero = ( $ignore_zero == 0 )? 0 : 1;
+$ignore = ( $ignore && $ignore ne "NA" )? $ignore : "NA";
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Read the incoming data
+my @colnames;
+my $total_elements = 0;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )	{
+		@colnames = split("$sep", $_);
+		print $fhout join("$sep", "Element", "UniqueTo", "Value"), "\n" if ( $cns == 1 );
+		next;
+	}
+	
+	# Loop over the rows
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	
+	my @elements;
+	for ( my $i=0; $i < scalar @row; $i++ )		{
+		next if ( ($ignore && $row[$i] eq "$ignore") || ( $ignore_zero == 1 && $row[$i] == 0 ) );
+		push @elements, [ $i, $row[$i] ];
+	}
+	if ( scalar @elements == 1 )	{
+		if ( $rns == 1 )	{
+			if ( $cns == 1 )	{	print $fhout join("$sep", $rowname, $colnames[ $elements[0]->[0] ], $elements[0]->[1]), "\n";		}
+			else 				{	print $fhout join("$sep", $rowname, $elements[0]->[0], $elements[0]->[1]), "\n";					}
+		}
+		else 		{
+			my $rowname = ( $cns == 1 )? $. - 1 : $. ;
+			if ( $cns == 1 )	{	print $fhout join("$sep", $rowname, $colnames[ $elements[0]->[0] ], $elements[0]->[1]), "\n";		}
+			else 				{	print $fhout join("$sep", $rowname, $elements[0]->[0], $elements[0]->[1]), "\n";					}
+		}
+	}
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;
+
+
+
+

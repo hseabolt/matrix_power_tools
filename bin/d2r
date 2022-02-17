@@ -1,0 +1,121 @@
+#!/usr/bin/perl
+
+# d2r.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Converts each element in a numeric matrix (assumed to be values of Cohen's D effect sizes) to the equivalent value of Pearson's correlation coefficient r.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use Scalar::Util qw(looks_like_number);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $n1;
+my $n2;
+
+sub usage {
+	my $usage = "d2r.pl\n
+	PURPOSE: Converts each element in a numeric matrix (assumed to be values of Cohen's D effect sizes) to the equivalent value of Pearson's correlation coefficient r.
+			
+			Warning: This will only work if the dataset sizes are equal.  If not, use \$ cohenD and toggle the -p flag to report out Pearson's r.
+	\n
+	USAGE:	d2r.pl -i input.cohenD.tab -o pearson_r.tab
+	-i		input matrix file where entries
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-o 		output file name
+	-s 		STR; input data separator ( Default: tab )
+	
+	=== REQUIRED PARAMETERS ===
+	-n1 	INT; size of the 1st dataset used to compute Cohen's D
+	-n2 	INT; size of the 2nd dataset used to compute Cohen's D
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'ncols|c=i' => \$cns,
+			'nrows|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'n1=i' => \$n1,
+			'n2=i' => \$n2,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+die "d2r::FATAL ERROR --> missing either N1 or N2 parameters!\n" if ( not $n1 || not $n2 );
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Loop over the lines of the incoming data
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, go ahead and print those
+	if ( $cns == 1 && $. == 1 )		{
+		print $fhout "$_\n";
+		next;
+	}
+	
+	# Now operate element-wise over the rows and print
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	foreach (@row)	{
+		if ( looks_like_number($_) )		{	$_ /= sqrt($_**2 + 4); 	}
+	}
+	if ( $rns == 1 )	{	print $fhout join("$sep", "PearsonR", @row), "\n";		}
+	else				{	print $fhout join("$sep", @row), "\n";						}
+
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;

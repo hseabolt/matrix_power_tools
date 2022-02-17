@@ -1,0 +1,178 @@
+#!/usr/bin/perl
+
+# degree.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Computes the degree of each node in an input graph (given as an adjacency matrix)
+# By default, computes the sum of the in-degree and out-degree.
+# Self-edges (loops) are treated as having a value of 2.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "degree.pl v0.1.0\n
+	PURPOSE: Computes the degree of each node in an input graph (given as an adjacency matrix)
+			By default, computes the sum of the in-degree and out-degree.
+			Self-edges (loops) are treated as having a value of 2.
+			**Assumes that the adjacency matrix is symmetrical**
+
+	\n
+	USAGE:	degree -i adjMatrix.tab -o degrees.tab
+	-i		input graph adjacency matrix
+	-o 		output file name 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; compute which degree value? One of 'in', 'out', or 'both' ( Default: both )
+	\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /(im?)in/ )? "in" : ( $method && $method =~ /(im?)out/ )? "out" : "both" ;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Read in the adjacency matrix
+my @G;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Column name handling
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	
+	# Row operations
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+	}
+	else 	{
+		my $tick = ( $cns == 1 )? $. - 1 : $.;
+		$rowname = "V" . "$tick";
+	}
+	push @rownames, $rowname;
+	
+	if ( scalar @colnames == 0 )	{
+		for ( my $j=0; $j < scalar @row; $j++ )	{
+			my $tick = $. + $j;
+			$colnames[$j] = "V" . "$tick";
+		}
+	}
+	
+	# Add the row to the @G
+	push @G, \@row;
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Loop over the graph and compute the degrees
+my %D = ();
+for ( my $i=0; $i < scalar @G; $i++ )	{
+	
+	# Initialize each node
+	$D{$rownames[$i]}{"in"} = 0;
+	$D{$rownames[$i]}{"out"} = 0;
+	
+	for ( my $j=0; $j < scalar @{$G[0]}; $j++ )		{
+		# In degree ( the lower triangle )
+		if ( $j < $i )	{
+			$D{$rownames[$i]}{"in"}++ if ( $G[$i]->[$j] != 0 );
+		}
+		# Self-loops (the diagonal)
+		elsif ( $j == $i )	{
+			$D{$rownames[$i]}{"in"}++ if ( $G[$i]->[$j] != 0 );
+			$D{$rownames[$i]}{"out"}++ if ( $G[$i]->[$j] != 0 );
+		}
+		# Out degree (the upper triangle)
+		elsif ( $j > $i ) 	{
+			$D{$rownames[$i]}{"out"}++ if ( $G[$i]->[$j] != 0 );
+		}
+	}
+}
+
+##################################################################################
+# Print the list
+print $fhout join("$sep", "Vertex", "Degree"), "\n" if ( $cns == 1 );
+foreach my $vertex ( @rownames )	{
+	if ( $method eq "in" )	{
+		print $fhout join("$sep", $vertex, $D{$vertex}{in}), "\n";
+	}
+	elsif ( $method eq "out" )		{
+		print $fhout join("$sep", $vertex, $D{$vertex}{out}), "\n";
+	}
+	else 	{
+		print $fhout join("$sep", $vertex, ($D{$vertex}{in} + $D{$vertex}{out})), "\n";
+	}
+}
+close $fhout if ( $succout );
+
+exit;

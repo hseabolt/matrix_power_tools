@@ -1,0 +1,150 @@
+#!/usr/bin/perl
+
+# gcd.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Calculates the greatest common divisor (GCD) of a list of numbers, either by row (default) or cumulatively.
+# Requires that the input data be numeric.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "gcd.pl v0.1.0\n
+	PURPOSE: Calculates the greatest common divisor (GCD) of a list of numbers, either by row (default) or cumulatively.
+			Requires that the input data be numeric.
+	\n
+	USAGE:	gcd.pl v0.1.0 -i matrix.tab -o entropy.tab
+	-i		input numeric data matrix.
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate GCD (either row [Default] or cumulative).
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ($rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /cum/ )? "cumulative" : "row";
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on the matrix line-by-line
+my @cumulative;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, just print our single header
+	if ( $cns == 1 && $. == 1 )	{
+		print $fhout "GCD\n";
+		next;
+	}
+	
+	# Now operate on the rows
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	
+	if ( $method ne "cumulative" )	{
+		if ( $rns == 1 )	{	print $fhout join("$sep", "$rowname", gcd( @row )), "\n";	}
+		else 				{	print $fhout gcd( @row ), "\n";								}
+	}
+	else 	{
+		for ( my $i=0; $i < scalar @row; $i++ )	{
+			push @cumulative, $row[$i];
+		}
+	}
+}
+close $fh if ( $succin );
+
+# Print the cumulative Entropy if this was requested
+if ( $method eq "cumulative" )	{
+	if ( $rns == 1 )	{	print $fhout join("$sep", "Cumulative", gcd( @cumulative )), "\n";	}
+	else 				{	print $fhout gcd( @cumulative ), "\n";								}
+}
+close $fhout if ( $succout );
+
+exit;
+
+############################### SUBROUTINES ######################################
+
+# Find the GCD of a list of numbers
+sub gcd 	{
+	my @list = @_;
+	my $gcd = gcd_euclid( $list[0], $list[1] );		# The first two elements
+	if ( scalar @list > 2 )	{
+		for ( my $i=2; $i < scalar @list; $i++ )	{
+			next if ( $list[$i] eq "inf" || $list[$i] eq "nan" );
+			$gcd = gcd_euclid( $gcd, $list[$i] );
+		}
+	}
+	return $gcd;
+}
+# Helper function for computing periodicity
+sub gcd_euclid 	{
+  	my ($a, $b) = @_;
+  	($a,$b) = ($b,$a) if $a > $b;
+  	while ($a) {
+    	($a, $b) = ($b % $a, $a);
+  	}
+  	return $b;
+}

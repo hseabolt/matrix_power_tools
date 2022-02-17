@@ -1,0 +1,482 @@
+#!/usr/bin/perl
+
+# describe.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Describes multiple summary statistics for an input numeric data matrix.
+
+# Note: currently only handles numeric data types, working on adding support for categorical data types.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use Scalar::Util qw(looks_like_number);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "describe.pl v0.1.0\n
+	PURPOSE: Normalizes an input numeric data matrix between two values (inclusive).
+
+	\n
+	USAGE:	describe.pl v0.1.0 -i data.tab -o summary.tab
+	-i		input numeric data matrix
+	-o 		output file name 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate descriptive statistics (either row [Default] or cumulative).
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /(?im)cum/ )? "cumulative" : "row";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# The order of descriptive stat elements in the resulting matrix
+my @stat_names = qw(count unique mean trimmed_mean variance stdev error skewness kurtosis harmonic_mean geometric_mean median odd_median mode min max range lower_quartile upper_quartile interquartile_range percentile10 percentile90 gini_index entropy);
+
+##################################################################################
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @P;
+my @Stats = ();
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}
+
+	# Compute the descriptive statistics
+	if ( $method ne "cumulative" )	{
+		my @row_stats = descriptive_statistics( @row );
+		my $index = ( $cns == 1 )? $.-2 : $.-1;
+		for ( my $i=0; $i < scalar @row_stats; $i++ )	{
+			$Stats[$i]->[$index] = $row_stats[$i];		 
+		}
+	}
+	else 	{
+		push @P, $_ foreach (@row);
+	}
+}
+close $fh if ( $succin );
+
+##################################################################################
+# If the user requested the cumulative method
+if ( $method eq "cumulative" )	{
+	my @p_stats = descriptive_statistics( @P );
+	for ( my $i=0; $i < scalar @p_stats; $i++ )	{
+		$Stats[$i]->[0] = $p_stats[$i];		 
+	}
+}
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Print the appropriate header(s) if we are using them
+if ( $cns == 1 )	{	( $method eq "cumulative" )? print $fhout "Cumulative\n" : print $fhout join("$sep", @rownames), "\n";		}
+
+# Print the data matrix
+for ( my $i=0; $i < scalar @Stats; $i++ )	{
+	print $fhout join("$sep", $stat_names[$i], @{$Stats[$i]}), "\n";
+}
+close $fhout if ( $succout );
+exit;
+
+###################################### SUBROUTINES #################################################
+
+# A fairly comprehensive report on the location and dispersion in a data set.
+# Be careful with various data structures, we expect a standard 1D array for these routines to function correctly.
+# Use the helper functions to convert a data structure from a hash or matrix to a standard array if needed.
+sub descriptive_statistics		{
+	my ( @data ) = @_;
+	my @summary;
+	
+	# Quick sanity check, do we have enough data to avoid bad mathematical errors?
+	return if ( scalar @data < 2 );
+
+	# Calculate the descriptive stats
+	$summary[0] = count( @data );
+	$summary[1] = unique( @data );
+	$summary[2]  = sprintf("%3.4f", mean( @data ));
+	$summary[3] = sprintf("%3.4f", trimmed_mean( 5, @data ));
+	$summary[4] = sprintf("%3.4f", variance( @data ));
+	$summary[5] = sprintf("%3.4f", stdev( @data ));
+	$summary[6] = sprintf("%3.4f", standard_error( @data ));
+	$summary[7] = sprintf("%3.4f", skewness( @data ));
+	$summary[8] = sprintf("%3.4f", kurtosis( @data ));
+	$summary[9] = sprintf("%3.4f", harmonic_mean( @data ));
+	$summary[10] = sprintf("%3.4f", geometric_mean( @data ));
+	$summary[11] = median( @data );
+	$summary[12] = odd_median( @data );
+	$summary[13] = mode( @data );
+	$summary[14] = min( @data );
+	$summary[15] = max( @data );
+	$summary[16] = range( @data );
+	$summary[17] = lower_quartile( @data );
+	$summary[18] = upper_quartile( @data );
+	$summary[19]= interquartile_range( @data );
+	$summary[20] = percentile( 10, @data );
+	$summary[21] = percentile( 90, @data );
+	$summary[22] = sprintf("%3.4f", gini_index( @data ));
+	$summary[23] = sprintf("%3.4f", entropy( @data ));
+	
+	# Set a default value of NA if something failed to calculate
+	foreach ( @summary )		{	$_ = "<NA>" if ( $_ eq "" );		}
+	return @summary;
+}
+
+# This is just a quick-n-dirty way to view the data from descriptive_statistics();
+# Not really useful for operating on it all
+sub pretty_print_stats		{
+	my ( $data, $fh ) = @_;
+	my %Stats = %{ $data };
+	print $fh " === Descriptive Statistics === \n";
+	print $fh " Count:\t\t\t$Stats{count}\n";
+	print $fh " Unique:\t\t$Stats{unique}\n";
+	print $fh "\n";
+	print $fh " Mean:\t\t\t$Stats{mean}\n";
+	print $fh " Truncated Mean:\t$Stats{truncated_mean}\n";
+	print $fh " Variance:\t\t$Stats{variance}\n";
+	print $fh " Std. Deviation:\t$Stats{stdev}\n";
+	print $fh " Std. Error:\t\t$Stats{standard_error}\n";
+	print $fh " Skewness:\t\t$Stats{skewness}\n";
+	print $fh " Kurtosis:\t\t$Stats{kurtosis}\n";
+	print $fh " Harmonic Mean:\t\t$Stats{harmonic_mean}\n";
+	print $fh " Geometric Mean:\t$Stats{geometric_mean}\n";
+	print $fh "\n";
+	print $fh " Range:\t\t\t$Stats{range}\n";
+	print $fh " Min:\t\t\t$Stats{min}\n";
+	print $fh " 10th Percentile:\t$Stats{percentile10}\n";
+	print $fh " 90th Percentile:\t$Stats{percentile90}\n";
+	print $fh " Max:\t\t\t$Stats{max}\n";
+	print $fh "\n";
+	print $fh " Lower Quartile:\t$Stats{lower_quartile}\n";
+	print $fh " Median:\t\t$Stats{median}\n";
+	print $fh " Upper Quartile:\t$Stats{upper_quartile}\n";
+	print $fh " Odd Median:\t\t$Stats{odd_median}\n";
+	print $fh "\n";
+	print $fh " Gini Index:\t\t$Stats{gini}\n";
+	print $fh " Shannon Entropy:\t$Stats{entropy}\n";
+	print $fh " ============================== \n";
+	print $fh "\n";	
+}
+
+####################################
+
+# Arithmetic Mean
+# average(), avg(), mu(), xbar() are aliases for this subroutine
+sub mean	{ 	
+	my ( @data ) = @_;
+	my $mean = 0;
+	$mean += $_ foreach ( @data );
+	return $mean / scalar @data;
+}
+
+# Standard Deviation (s)
+# stardard_deviation, SD, sd, st.dev are all aliases for this subroutine
+sub stdev	{
+	my ( @data ) = @_;
+	return if ( scalar @data == 1 );
+	my $mean = mean(@data);
+	my $std = 0;
+	foreach ( @data ) {	$std += ( $_ - $mean ) ** 2;      }
+	$std = ( $std / scalar @data ) ** 0.5;
+	return $std;
+}
+
+# The variance of a sample == the standard deviation squared (s^2)
+sub variance	{
+	my ( @data ) = @_;
+	return "0" if ( scalar @data == 1 );
+	my $mean = mean(@data);
+	my $var = 0;
+	foreach ( @data ) {	$var += ($_ - $mean)**2;      }
+	$var /= scalar @data;
+	return $var;
+}
+
+# Standard error -- a measure of the dispersion of data around the mean of the data
+sub standard_error	{
+	my ( @data ) = @_;
+	return stdev(@data) / sqrt(scalar @data);
+}
+
+# Returns the cummulative sum of a list of numeric data
+sub sum	{
+	my ( @data ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @data );	
+	return $sum;
+}
+
+# Returns the max value of a list of numeric data
+sub max 	{
+	my ( @data ) = @_;
+	my $max = $data[0];
+	foreach my $x ( @data )	{	$max = $x if ( $x > $max );		}
+	return $max;
+}
+
+# Returns the min value of a list of numeric data
+sub min	{
+	my ( @data ) = @_;
+	my $min = $data[0];
+	foreach my $x ( @data )	{	$min = $x if ( $x < $min );		}
+	return $min;
+}
+
+# Returns the range ($max - $min) of the values in the list of numeric data
+sub range	{	return ( max(@_) - min(@_) );	}
+
+# Returns the median value of an array list
+sub median {
+    my ( @list ) = @_;
+	my @data = ( scalar @_ == 0 )? return 0 : sort { $a <=> $b } @list;
+    if ( scalar(@data) % 2 ) {
+        return ( $data[ @data / 2 ] );
+    } 
+    else {
+        my ( $upper, $lower );
+        $lower = $data[ @data / 2 ];
+        $upper = $data[ @data / 2 - 1 ];
+        return ( ($lower + $upper)/2 );
+    }
+}
+
+# Returns the odd median from a list of numbers, should we want an actual value in the data set to be used as the median instead of a possible average of 2 values
+sub odd_median		{
+	my ( @list ) = @_;
+	my @data = sort { $a <=> $b } @list;
+	my @odd_median = $data[(@data - (0,0,1,0)[@data & 3]) / 2];
+	return $odd_median[0];
+}
+
+# Returns the mode of a data set
+# If there are multiple values that are the mode (appear equally as many times), then we return the median of these values.
+sub mode 	{
+	my ( @data ) = @_;
+	my ( %Count, @result);
+	
+	$Count{$_}++ foreach ( @data );
+	foreach ( sort { $Count{$b} <=> $Count{$a} } keys %Count )	{
+		last if ( @result && $Count{$_} != $Count{$result[0]} );
+		push @result, $_;
+	}
+	my $mode = odd_median( @result );
+	return $mode;
+}
+
+# Returns the number of non-empty elements in a given array
+sub count	{
+	my ( @data ) = @_;
+	return scalar @data;
+}
+
+sub unique	{
+	my ( @data ) = @_;
+	my %Seen = map { $_ => 1 } @data;
+	return scalar keys %Seen;
+}
+
+# Returns the Fisher-Pearson coefficient of skewness of a list of numerical data, which is the measure of symmetry around the mean of the data.
+# Returns NA if the data contains NA values
+sub skewness	{
+	my ( @data ) = @_;
+	return "<NA>" if ( grep { $_ eq "NA" || $_ eq "na" } @data );
+	my $skewness;
+	my $mean = mean(@data);
+	foreach ( @data )	{	$skewness += ($_ - $mean) ** 3;		}
+	$skewness = ( $skewness / scalar @data );	
+	my $stdev = stdev(@data);
+	( $stdev == 0 )? return 0 : return $skewness / $stdev ** 3;
+}
+
+# Kurtosis measures the "tailed-ness" of a data set, and is the ratio of the 4th moment and the second moment squared.
+sub kurtosis	{
+	my ( @data ) = @_;
+	return "NA" if ( grep { $_ eq "NA" || $_ eq "na" } @data );
+	my $mean = mean(@data);
+	my $kurtosis;
+	foreach ( @data )	{	$kurtosis += ($_ - $mean) ** 4;		}
+	$kurtosis = ( $kurtosis / scalar @data );
+	my $variance = variance( @data );
+	( $variance == 0 )? 0 : return $kurtosis / variance(@data) ** 2;
+}
+
+# Calculates the Gini coefficient from a 1D list of non-negative, ascending sorted numbers
+# The index ranges from 0 to 1, with values approaching 1 indicating increasing unevenness (we want a value close to 0)
+sub gini_index		{
+	my ( @distances ) = @_;
+	@distances = sort { $a <=> $b } @distances;
+	my $n = scalar @distances;
+	my $sum = sum( @distances );
+	my $gini_index;
+	for ( my $i=0; $i < $n; $i++ )	{
+		$gini_index += ((2*($i  +1) - $n - 1) * $distances[$i]) / ($n * $sum);		# Function described: https://github.com/oliviaguest/gini
+	}
+	return sprintf("%1.3f", $gini_index);
+}
+
+# Quartiles
+# Returns the elements at the quartile indices for the array of numbers, sorted
+# Note that we are NOT including Q0 (the minimum value in the array) or Q4 (the maximum)
+sub lower_quartile	{
+	my ( @data ) = @_;
+	my @sorted = sort { $a <=> $b } @data;
+	my $q1 = $sorted[ (scalar @sorted + 1) * (1/4) ];
+	return $q1;
+}
+
+sub upper_quartile	{
+	my ( @data ) = @_;
+	my @sorted = sort { $a <=> $b } @data;
+	my $q3 = $sorted[ (scalar @sorted + 1) * (3/4) ];
+	return $q3;
+}
+
+# Q3 - Q1
+sub interquartile_range		{
+	my ( @data ) = @_;
+	my @sorted = sort { $a <=> $b } @data;
+	return $sorted[ (scalar @sorted + 1) * (3/4) ] - $sorted[ (scalar @sorted + 1) * (1/4) ];
+}
+
+# Get the INDICES of the quartiles in the array
+sub quartile_index	{
+	my ( @data ) = @_;
+	my $q1 = int((scalar @data + 1) * (1/4));
+	my $q2 = int((scalar @data + 1) * (2/4));
+	my $q3 = int((scalar @data + 1) * (3/4));
+	return ( $q1, $q2, $q3 );
+}
+
+# Percentile
+# Returns the VALUE in the array element at this percentile index
+sub percentile	{
+	my ( $n, @data ) = @_;
+	my @sorted = sort { $a <=> $b } @data;
+	my $percentile = $sorted[ (scalar @sorted + 1) * ($n/100) ];
+	( $percentile )? return $percentile : return "<NA>";
+}
+
+# Returns the VALUE in the array element at this percentile index
+sub percentile_index	{
+	my ( $n, @data ) = @_;
+	my $percentile = int((scalar @data + 1) * ($n/100));
+	return $percentile;
+}
+
+# Harmonic mean, which is the reciprocal of the arithmetic mean of the reciprocals.
+sub harmonic_mean	{
+	my ( @data ) = @_;
+	my $hmean;
+	my $n = scalar @data;
+	foreach ( @data )	{ 	
+		$hmean = ( $_ != 0 )? $hmean += 1 / $_ : $n--;
+	}
+	return $n / $hmean;
+}
+
+
+# Geometric mean, which is the n-th root of the cummulative product of a data set of numbers.
+sub geometric_mean	{
+	my ( @data ) = @_;
+	my $product = $data[0] ** (1/scalar @data);
+	foreach ( @data ) 	{	$product *= $_;		}
+	return $product ** (1/scalar @data);
+}
+
+# Trimmed mean --> arithmetic mean trimmed by x% (eg. 5% would remove 2.5% on both upper and lower bounds)
+# Truncated_mean is an alias for this functions
+sub trimmed_mean	{
+	my ( $x, @data ) = @_;
+	my @sorted = sort { $a <=> $b } @data;
+	my $trim = int($x/2);
+	my @trimmed = splice( @sorted, $trim, (scalar @sorted + 1) - $x );
+	return mean(@trimmed);
+}
+
+# Calculates Shannon Entropy H'
+sub entropy		{
+	my ( @sample ) = @_;
+	
+	# Error handling: return 0 if $N is zero
+	my $N = sum( @sample );
+	return ( 0 ) if ( $N == 0 );		
+	
+	# Calculate *p* for each species *i* <-- this can be thought of as relative abundance, but this is only one way to estimate that measure
+	my @pis;
+	for ( my $i=0; $i < scalar @sample; $i++ )	{
+		$pis[$i] = ( $sample[$i] == 0 )? 0 : ($sample[$i]/$N) * log($sample[$i]/$N);
+	}
+
+	# Sum @pis and multiply by -1
+	my $H = -( sum(@pis) );
+	return $H;
+}

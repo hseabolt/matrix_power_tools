@@ -1,0 +1,155 @@
+#!/usr/bin/perl
+
+# colNames.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Prints the column names of an incoming data matrix, one per line.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $sep;
+my $cns;
+my $add;
+my $drop;
+
+sub usage {
+	my $usage = "colNames.pl\n
+	PURPOSE: Prints the column names of an incoming data matrix, one per line.
+	\n
+	USAGE:	colNames.pl -i NxM.tab -o names.txt
+	-i		input matrix file
+	-o 		output file name
+	-s 		STR; input data separator ( Default: tab )
+	-replace 	(Optional) list of new column names to assign to the incoming matrix (can be given as a csv list or as a file with one header per line)
+	-add 		(Optional) list of new column names to add to the incoming matrix (can be given as a csv list or as a file with one header per line)
+				-add is incompatible with -replace.
+	-drop		(Optional) drops *ALL* column names and outputs header-less data.
+
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'replace=s' => \$cns,
+			'add=s' => \$add,
+			'sep|s=s' => \$sep,
+			'drop' => \$drop,
+) or die usage();
+
+# Parameter setups
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$drop = ( $drop ) ? 1 : 0;
+
+# Get the new column names if we have them, either from -replace or -add (Preference is given to -replace)
+my @new_colNames;
+if ( $add && -e $add )	{
+	open(LIST, "$add") or die "$!\n";
+		@new_colNames = <LIST>;
+	close LIST;
+}
+elsif ( $add )	{
+	@new_colNames = split(",", $add);
+}
+if ( $cns && -e $cns )	{
+	open(LIST, "$cns") or die "$!\n";
+		@new_colNames = <LIST>;
+	close LIST;
+}
+elsif ( $cns )	{
+	@new_colNames = split(",", $cns);
+}
+chomp $_ foreach (@new_colNames);
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Construct a 2D AoA matrix from the incoming data
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, go ahead and print those
+	if ( $. == 1 )	{
+		next if ( $drop == 1 );
+		my @colNames = split("$sep", $_);
+		
+		if ( $add )		{
+			if ( scalar @new_colNames > 0 && scalar @new_colNames == scalar @colNames )		{	
+				print $fhout join("$sep", @new_colNames), "\n";			
+			}
+			elsif ( scalar @new_colNames > 0 && scalar @new_colNames != scalar @colNames )	{
+				warn "colNames::ERROR 1 --> The number of new column names for assignment is not equal to the number of previous column names!  Skipping assignment.\n";
+				last;
+			}
+		}
+		# If we are replacing old column headers, then assume that we also want to print out the newly modified matrix
+		elsif ( scalar @new_colNames > 0 && scalar @new_colNames == scalar @colNames )		{	
+			@colNames = @new_colNames;
+			print $fhout join("$sep", @colNames), "\n";
+			next;			
+		}
+		elsif ( scalar @new_colNames > 0 && scalar @new_colNames != scalar @colNames )	{
+			warn "colNames::ERROR 2 --> The number of new column names for assignment is not equal to the number of previous column names!  Skipping assignment.\n";
+			last;
+		}
+		# If we just want to check the existing column headers, then just print them
+		else	{
+			print $fhout join("\n", @colNames), "\n";
+			last;
+		}
+	}
+	
+	# Print the remaining rows of the matrix if we replaced the column headers successfully
+	print $fhout "$_\n";
+	
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;
+
+
+
+

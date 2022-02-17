@@ -1,0 +1,177 @@
+#!/usr/bin/perl
+
+# chi-square.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Computes the chi-square statistic for an input data matrix.  
+# Rows are treated as categories/observations and columns are treated as samples (i.e. this program uses *row* sums 
+# in the chi-square calculation formula.).  Default behavior assumes that each category has an equal chance 
+# of being observed, however this can be changed by passing a distribution of weights to -E.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $inputB = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+
+sub usage {
+	my $usage = "chi-square.pl v0.1.0\n
+	PURPOSE: Computes the chi-square statistic for an input data matrix.  
+	Rows are treated as categories/observations and columns are treated as samples.
+	Default behavior assumes that each category has an equal chance of being observed, 
+	however this can be changed by passing a distribution of weights to -E.
+
+	\n
+	USAGE:	chi-square.pl v0.1.0 -P data.tab -o x2.tab
+	-i		input numeric data matrix.
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+	
+	=== OPTIONAL EXTRAS ===
+	-E 		A distribution of the mean/Expected number of times a category should be observed.
+			By default, this program assumes that this is a Uniform distribution across all categories 
+			in the input data and that each has an equal likelihood of being observed.  This can be 
+			changed by providing a file matching the order of the categories in -input, one weight per line.
+			Each weight should be given as a *probability*, not a raw frequency.
+			
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'weights|E=s' => \$inputB,
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+print $fhout "Statistic\n" if ( $cns == 1 );
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @obs;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}
+	push @obs, sum(@row);
+}
+close $fh if ( $succin );
+
+# Open and read the weights (Expected distribution)
+my @Expected;
+if ( $inputB && $inputB ne "--" )	{
+	# If Set B exists in a file that we want to read
+	if ( -e $inputB )	{
+		open(SETB, "<", $inputB) or die "chi-square::FATAL ERROR --> Problem with file for Expected distribution! $!\n"  ;
+		while ( <SETB> )	{
+			chomp $_;
+			push @Expected, $_;
+		}
+		close SETB;
+	}
+	# If not, then -B could be coming in from "STDIN" e.g. a subshell or shell variable
+	# -B then is equal to @ARGV + the element of $inputB
+	else	{
+		my @B = @ARGV;
+		unshift @B, $inputB;
+		foreach ( @B )		{
+			chomp $_;
+			push @Expected, $_;
+		}
+	}
+}
+else 	{
+	my $total_obs = sum(@obs);
+	for ( my $e=0; $e < scalar @obs; $e++ )	{
+		$Expected[$e] = ( $total_obs / scalar @obs );			# A Uniform distribution over @obs
+	}
+}
+
+# Sanity check --> is the length of @Expected equal to the number of categories in @obs ?
+die "chi-square::FATAL ERROR --> the Expected distribution is not compatible with the observed data!\n" if ( scalar @Expected != scalar @obs );
+
+# Loop over the matrix and compute the normalization
+my $chisq = 0;
+for ( my $i=0; $i < scalar @obs; $i++ )	{
+	$chisq += ($obs[$i] - $Expected[$i])**2 / $Expected[$i];			
+}
+if ( $rns == 1 )	{	print $fhout join("$sep", "Chi-Square", $chisq),"\n";		}
+else 				{ 	print $fhout join("$sep", $chisq),"\n";						}
+close $fhout if ( $succout );
+exit;
+
+################################## SUBROUTINES ###########################################
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

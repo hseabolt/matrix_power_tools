@@ -1,0 +1,237 @@
+#!/usr/bin/perl
+
+# collate.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 6-3-2020
+
+# SYNOPSIS
+# This program merges multiple frequency matrices (headers and row names are required for this) into a new, resized larger matrix.
+# The intent here is to function a bit like R's cbind or rbind.
+
+# **WARNING** input data matrices are expected to have compatible data types!  Numeric data takes precedence over categorical data. 
+# In the even of a merge conflict between two categorical data, the incoming data will overwrite the existing data.
+
+# Developer's note: Much of this code is reused from an existing tool I developed for use with kmer data, so many
+# variable names and comments relate to this.  Regardless, the incoming data matrices should still work fine depsite
+# me being too lazy to go back and refactor this code to more closely resemble conventions used elsewhere in the matrix power toolbox.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use File::Basename; 
+use Scalar::Util qw(looks_like_number);
+
+# Required input parameters
+my $input = "--";
+my $output = "--";
+my $sep;
+my $missing;
+
+sub usage {
+	my $usage = "collate v0.1.0\n
+	PURPOSE:    This program merges multiple frequency matrices (headers and row names are *required* for this) 
+			into a new, resized larger matrix. The intent here is to function a bit like R's cbind or rbind.
+            
+			**WARNING** input data matrices are expected to have compatible data types!  Numeric data takes precedence over categorical data. 
+			In the even of a merge conflict between two categorical data, the incoming data will overwrite the existing data.
+					
+	USAGE: collate [options]
+	-in                       input file containing a list of matrix files, one per line   
+	-sep                     separator for the input data matrix.  (Default: tab)
+	-out                     output file name
+	-missing 				 value to use as placeholder for missing data, e.g. 0 or \"<NA>\"? ( Default: 0 )
+	\n";
+	print $usage;
+}
+
+GetOptions( 'in|i=s' => \$input,
+			'output|o=s' => \$output,		
+			'sep|s=s' => \$sep,				
+			'missing|m=s' => \$missing,
+) or die usage(); 
+
+# Parameter setups
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";	
+$missing = ( $missing )? $missing : 0;
+
+###########################################################################################
+# If it appears that we just gave a file containing a list of genomes, one per line
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+	my @proc_order = <$fh>;
+close $fh if ( $succin );
+die "collate::ERROR --> Insufficient input data provided!\n$!\n" if ( scalar @proc_order == 0 );		# We dont have any data!
+
+# Initialize the multidimensional hashes and some simple lists
+my @names;
+foreach my $matrix_file ( @proc_order )	{
+	# Get the genome's basename
+	chomp $matrix_file;
+	my $matrix = fileparse($matrix_file);
+	$matrix =~ s/\.kmer.*//g;
+	push @names, $matrix;
+}
+###########################################################################################
+
+# This hash is associated with the _stateToIndex() subroutine, but it must be outside the subroutine scope to be maintainable and accessible.
+my $h = 0;				# The initial index in the prebuilt hash of states below, we will increment it if needed
+my %Index = ();
+my %ReverseIndex = ();
+
+###########################################################################################
+# Foreach file in the list of matrices, open it, and add all of it's data
+# Note: we are storing ALL kmers, regardless of lexocographic size, etc.  
+my %Kmers = ();
+my @rownames;
+my $merge_conflicts = 0; 		# Just a flag to signal that we encountered some merge conflicts and to treat resulting merged data with extreme caution.
+# Operate on all the matrix files
+foreach my $matrix_file ( @proc_order )	{
+	my $matrix = fileparse($matrix_file, qr/\.[^.]*/);
+	
+	# Open and read the file
+	open MATRIX, "$matrix_file" if ( -e $matrix_file );		# Might not have any excluded sequences;
+		my @cells = <MATRIX>;
+		chomp $cells[0];
+	close MATRIX;
+
+	# Remove any random empty elements from the header row and hash the headers into an enumeration
+	my @headers = split("$sep", shift @cells);
+	@headers = grep { $_ =~ /[\S]/ } @headers;		
+	_columnToIndex( $_ ) foreach ( @headers );
+	
+	foreach my $row ( @cells )	{
+		chomp $row;
+		my @row = split("$sep", $row);
+		my $kmer = shift @row;
+		push @rownames, $kmer;
+		
+		#Quick sanity check: Is the length of the row now the same as the number of headers?
+		if ( scalar @row != scalar @headers )		{
+			warn "collate::WARNING --> Incorrect number of elements on row $kmer (line ", $. + 1, ")\n";
+			next;
+		}
+		
+		# Resize the row to the correct length
+		for ( my $j=0; $j < scalar keys %Index; $j++ )	{
+			$Kmers{$kmer}->[$j] = ( exists $Kmers{$kmer}->[$j] )? $Kmers{$kmer}->[$j] : $missing;
+		}
+		
+		# Set the data in the appropriate columns
+		for ( my $i=0; $i < scalar @row; $i++ )	{	
+			my $index = _columnToIndex( $headers[$i] );
+			
+			# A decision ladder for handling merge conflicts:
+			# What to do when data types are not compatible with each other?  
+			
+			# If the incoming data from @row appears to be numeric ... 
+			if ( looks_like_number( $row[$i] ) )	{
+				#and the existing data is numeric, everything is good
+				if ( looks_like_number($Kmers{$kmer}->[$index]) ) 	{		$Kmers{$kmer}->[$index] = ( exists $Kmers{$kmer}->[$index] )? ($Kmers{$kmer}->[$index] + $row[$i]) : $row[$i];				}
+				# otherwise if the existing data is categorical, then the incoming data $row[$i] takes precedence
+				else 												{		$Kmers{$kmer}->[$index] = $row[$i];	$merge_conflicts = 1;																	}
+			}
+			# Else if $row[$i] is not numeric ...
+			else 	{
+				# and the existing data is numeric, the numeric data takes precedence.
+				if ( looks_like_number($Kmers{$kmer}->[$index]) ) 	{		$Kmers{$kmer}->[$index] = ( exists $Kmers{$kmer}->[$index] )? $Kmers{$kmer}->[$index] : $row[$i];	$merge_conflicts = 1;	}
+				# Elsewise if both data are categorical, then the incoming data $row[$i] overwrites
+				else 												{		$Kmers{$kmer}->[$index] = $row[$i];																							}
+			}
+		}
+		# There will be alot of missing values in rows that we only see once and various other scenarios. 
+		# We will address these when we go to print out the final product
+	}
+}
+###########################################################################################
+
+print STDERR "collate::WARNING --> merge conflicts were detected between incompatible data types.  Treat results with extreme caution.\n" if ( $merge_conflicts == 1 );
+
+###########################################################################################
+# Print out the newly resized/merged matrix
+# Dimensions = ( rows=number of keys in %Kmers, cols=number of keys in %Index )
+my @colnames;
+for ( my $i=0; $i < scalar keys %Index; $i++ )	{
+	push @colnames, _indexToColumn($i);
+}
+
+# Print the header line (will be number of Axis 1 elements minus 1)
+my $succout = open(OUT, ">", "$output") if ( $output ne '--' );
+if ( $succout ) 	{ 	print OUT 	 join("$sep", @colnames), "\n";		}
+else 				{ 	print STDOUT join("$sep", @colnames), "\n";		}
+
+# Print each row, adjusting for potential missing values (init anything missing to $missing)
+foreach my $n ( keys %Kmers )	{
+	for ( my $m=0; $m < scalar @colnames; $m++ )	{
+		my $index = _columnToIndex( $colnames[$m] );
+		$Kmers{$n}->[$m] = ( exists $Kmers{$n}->[$m] )? $Kmers{$n}->[$m] : $missing;
+	}
+	if ( $succout ) 	{	print OUT    "$n$sep", join("$sep", @{$Kmers{$n}}), "\n";	}
+	else 				{	print STDOUT "$n$sep", join("$sep", @{$Kmers{$n}}), "\n";	}
+}
+close OUT if ( $succout );
+###########################################################################################
+
+exit;
+
+
+
+##########################   SUBROUTINES    ###################################
+
+# Converts key current character into index
+sub _columnToIndex	{
+	my ( $column )	= @_;
+	return if ( not $column );		# Sanity check
+	chomp $column;
+	my $index;
+	
+	if ( exists $Index{$column}  ) 	{
+		$index = $Index{$column};
+	}
+	# If the index doesnt exist in the Index hash, then add it at the end and increment the value
+	else		{
+		$Index{$column} = $h;				
+		$ReverseIndex{$h} = $column;
+		$h++;
+		$index = $Index{$column};
+	}
+	return $index;
+}
+
+# Converts key current index into character
+sub _indexToColumn	{
+	my ( $index )	= @_;
+	my $column;
+	if ( exists( $ReverseIndex{$index} ) ) 	{
+		$column = $ReverseIndex{$index};
+	}
+	# If the index doesnt exist in the ReverseIndex hash, then there is nothing we can do...
+	return $column;
+}

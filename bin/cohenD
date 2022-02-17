@@ -1,0 +1,229 @@
+#!/usr/bin/perl
+
+# cohenD.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Computes the Effect Size as the difference between means of two distributions P and Q using Cohen's D.
+# Currently only handles TWO matrices and computes effect size over the entire matrices. 
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input1 = "--";
+my $input2 = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $pearson = 0;
+
+sub usage {
+	my $usage = "cohenD.pl v0.1.0\n
+	PURPOSE: Computes the Effect Size as the difference between means of two distributions P and Q using Cohen's D.
+			Currently only handles TWO matrices and computes effect size over the entire matrices. 
+	\n
+	USAGE:	cohenD.pl v0.1.0 -P data1.tab -Q data2.tab -o D.tab
+	-P		first input matrix P.
+	-Q 		second input matrix Q, formatted the same as the first matrix.
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-c 		FLAG; report Pearon's correlation coefficient r instead of Cohen's D? ( Default: OFF )
+\n";
+	print $usage;
+}
+
+GetOptions(	'1|P=s' => \$input1, 
+			'2|Q=s' => \$input2,
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'pearson|c=i' => \$pearson,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$pearson = ( $pearson != 0 )? 1 : 0;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX1, "<", "$input1") if ( $input1 ne "--" && -e $input1 );
+$fh = *MATRIX1 if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+print $fhout "Value\n" if ( $cns == 1 );
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @M;
+my @P;
+my @Q;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}
+	push @P, $_ foreach @row;
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Read the second matrix, which must come from a file and have the same formatting as the first matrix
+if ( $input2 ne "--" && -e $input2 ) 		{
+	open(MATRIX2, "<", "$input2" ) or die "cohenD::FATAL ERROR with 2nd input file $input2 --> $!\n";
+		my @data2 = <MATRIX2>;
+	close MATRIX2;
+
+	# Operate on the matrix line-by-line
+	
+	for ( my $i=0; $i < scalar @data2; $i++ )	{
+		chomp $data2[$i];
+		if ( $cns == 1 && $i == 0 )		{
+			next;
+		}
+		my @row = split("$sep", $data2[$i]);
+		if ( $rns == 1 )		{
+			my $rowname = shift @row ;
+		}
+		push @Q, $_ foreach @row;
+	}
+	
+	# Compute the means and sample variances of both lists
+	my ( $meanP, $varP ) = variance(@P);
+	my ( $meanQ, $varQ ) = variance(@Q);
+
+	# Calculate the pooled sample variance
+	my $n1 = scalar @P;
+	my $n2 = scalar @Q;
+	my $pooled_variance = sqrt( (($n1-1)*$varP + ($n2-1)*$varQ) / ($n1 + $n2 - 2) );
+
+	# Calculate Cohen's D
+	my 	$cohenD = ($meanP - $meanQ) / $pooled_variance;
+	
+	# Convert to Pearon's r if requested
+	$cohenD /= sqrt($cohenD**2 + 4) if ( $pearson == 1 );
+	
+	# Print the output
+	if ( $rns == 1 )	{	
+		if ( $pearson == 1 )	{	print $fhout join("$sep", "PearsonR", $cohenD),"\n";				}
+		else 					{	print $fhout join("$sep", "CohenD(P,Q)", $cohenD),"\n";		}
+	}
+	else 				{ 	print $fhout join("$sep", $cohenD), "\n";						}
+	close $fhout if ( $succout );
+
+	exit;	
+}
+# If we are computing covariance among the rows of a single input matrix, then we are actually computing a variance-covariance matrix
+else 		{
+	#Initialize a variance-covariance matrix
+	my @D;
+	
+	# Decide on a value for n --> if only 2 elements in the lists, then use N.  If more, use N-1.  (N is the number of elements in the lists).
+	my $N = ( scalar @{$M[0]} == 2 )? scalar @{$M[0]} : scalar @{$M[0]} - 1;
+	
+	# Print the rownames as columns if we have them
+	print $fhout join("$sep", @rownames), "\n" if ( $cns == 1 );
+	
+	# The loop to compute pairwise covariances
+	for ( my $i=0; $i < scalar @M; $i++ )	{
+		for ( my $j=$i; $j < scalar @M; $j++ )	{
+			
+			# Compute the means and sample variances of both lists
+			my ( $meanP, $varP ) = variance(@P);
+			my ( $meanQ, $varQ ) = variance(@Q);
+
+			# Calculate the pooled sample variance
+			my $n1 = scalar @P;
+			my $n2 = scalar @Q;
+			my $pooled_variance = sqrt( (($n1-1)*$varP + ($n2-1)*$varQ) / ($n1 + $n2 - 2) );
+			
+			# Calculate Cohen's D
+			my 	$cohenD = ($meanP - $meanQ) / $pooled_variance;
+	
+			# Convert to Pearon's r if requested
+			$cohenD /= sqrt($cohenD**2 + 4) if ( $pearson == 1 );
+			
+			# Set the matrix cells --> here the matrix is symmetrical
+			$D[$i]->[$j] = $cohenD;
+			$D[$j]->[$i] = $cohenD;
+		}
+		if ( $rns == 1 )	{	print $fhout join("$sep", $rownames[$i], @{$D[$i]}),"\n";		}
+		else 				{ 	print $fhout join("$sep", @{$D[$i]}), "\n";											}
+	}
+	close $fhout if ( $succout );
+	exit;
+}
+
+############################ SUBROUTINES ################################################
+
+sub sum	{
+	my ( @data ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @data );	
+	return $sum;
+}
+
+sub mean	{ 	
+	return sum(@_)/@_;
+}
+
+# Variance using the sample variance formula
+sub variance	{
+	my ( @data ) = @_;
+	return "0" if ( scalar @data == 1 );
+	my $mean = mean(@data);
+	my $var = 0;
+	foreach ( @data ) {	$var += ($_ - $mean)**2;      }
+	$var /= scalar @data - 1;
+	return ($mean, $var);
+}

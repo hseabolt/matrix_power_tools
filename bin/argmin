@@ -1,0 +1,164 @@
+#!/usr/bin/perl
+
+# argmin.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Prints the index of the minimal value in a matrix (flattened into a single array) or per row/column as specified by the user.
+# If ties occur, only the first index is returned. 
+# NOTE: Indices are 0-indexed.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use Scalar::Util qw(looks_like_number);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $axis;
+
+sub usage {
+	my $usage = "argmin.pl\n
+	PURPOSE: Prints the index of the minimal value in a matrix (flattened into a single array) or per row/column as specified by the user.
+			If ties occur, only the first index is returned. 
+			NOTE: Indices are 0-indexed.
+	\n
+	USAGE:	argmin.pl -i input.matrix.tab -o argmin.tab
+	-i		input matrix file
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-o 		output file name
+	-s 		STR; input data separator ( Default: tab )
+	-axis	STR; one of: all [Default], rows, cols.
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'ncols|c=i' => \$cns,
+			'nrows|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'axis|a=s' => \$axis,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$axis = ( $axis && $axis =~ /(?im)row/ )? "row" : ( $axis && $axis =~ /(?im)col/ )? "col" : "all";
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Loop over the lines of the incoming data
+my @flattened;
+my @argmaxes;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, go ahead and print those
+	next if ( $cns == 1 && $. == 1 );
+	
+	# Generate the flattened array if we need it
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	if ( $axis eq "all" )		{
+		push @flattened, @row;
+	}
+	# Otherwise if we require the argmax per row
+	elsif ( $axis eq "row" )	{
+		push @argmaxes, argmin( @row );
+	}
+	# If we made it here, then we want the column argmax
+	else	{
+		push @flattened, \@row;
+	}
+}
+close $fh if ( $succin );
+
+# If we are computing the global argmax, then compute that here
+if ( $axis eq "all" )	{
+	print $fhout argmin( @flattened ), "\n";
+}
+elsif ( $axis eq "row" ) 	{
+	print $fhout join("$sep", @argmaxes), "\n";
+}
+# For column argmax's, transpose the matrix and compute the
+else	{
+	my @matrix = @{ transpose(@flattened) };
+	push @argmaxes, argmin( @{$_} ) foreach (@matrix);
+	print $fhout join("$sep", @argmaxes), "\n";
+}
+close $fhout if ( $succout );
+
+exit;
+
+########################### SUBROUTINES #####################################
+
+# Calculates the argmin from a list.
+# Returns the first occurence if there are ties.
+sub argmin	{
+	my ( @list ) = @_;
+	my $min= $list[0];
+	for ( my $i=0; $i < scalar @list; $i++ )	{
+		$min = $list[$i] if ( $list[$i] < $min );
+	}
+	my @argmin;
+	for ( my $i=0; $i < scalar @list; $i++ )	{
+		push @argmin, $i if ( $list[$i] == $min );
+	}
+	return $argmin[0];		# This gives us the first index if there are ties
+}
+
+# Transpose
+sub transpose	{
+	my ( @M ) = @_;
+	my $matrix_t = [ ];
+	for ( my $i=0; $i < scalar @M; $i++ )	{
+		for ( my $j=0; $j < scalar @{$M[0]}; $j++ )	{
+			$matrix_t->[$j]->[$i] = $M[$i]->[$j];
+		}
+	}
+	return $matrix_t;
+}

@@ -1,0 +1,223 @@
+#!/usr/bin/perl
+
+# base-n.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Converts each element in a numeric integer matrix to its base-n value, where e.g. base-10 is the standard decimal number, base-2 is binary, etc.
+# Currently supports up to base-96 using simple ASCII characters.
+# WARNING: while we are using ASCII characters, they don't necessarily match their ASCII value!  This program also includes a 'decoding' subroutine to handle this.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $base_in;
+my $base_out;
+
+sub usage {
+	my $usage = "base-n.pl\n
+	PURPOSE: Converts each element in a numeric integer (base-10 decimal) matrix to its base-n value, where e.g. base-10 is the standard decimal number, base-2 is binary, etc.
+			Currently supports up to base-96 using simple ASCII characters.
+			
+			
+			CAVEATS: while we are using ASCII characters, they don't necessarily match their ASCII value!  This program also includes a 'decoding' subroutine to handle this.
+			Current implementation does not handle floating point values, and will automatically convert these to integers.  Be mindful of this loss of precision.
+			
+	\n
+	USAGE:	base-n.pl -i input.cohenD.tab -o pearson_r.tab -b 2
+	-i		input matrix file where entries are numeric and are expected to be in standard base-10 decimal form. 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-o 		output file name
+	-s 		STR; input data separator ( Default: tab )
+	-ni 	INT; positive integer value of the base that you wish to convert from (between 2 and 96) [ Default: 10 (decimal) ]
+	-no 	INT; positive integer value of the base that you wish to convert to (between 2 and 96) [ Default: 2 (binary) ]
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'ncols|c=i' => \$cns,
+			'nrows|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'base-in|ni=i' => \$base_in,
+			'base-out|no=i' => \$base_out,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$base_in = ( $base_in && $base_in > 1 && $base_in <= 96 )? $base_in : 10;
+$base_out = ( $base_out && $base_out > 1 && $base_out <= 96 )? $base_out : 2;
+
+# Encoding and Decoding hash tables (case sensitive!)
+my %charIndex = (
+	# Numbers
+	'0' => 0, '1' => 1, '2' => 2, '3' => 3, '4' => 4,
+	'5' => 5, '6' => 6, '7' => 7, '8' => 8, '9' => 9,
+	# Uppercase
+	'A' => 10, 'B' => 11, 'C' => 12, 'D' => 13, 'E' => 14,
+	'F' => 15, 'G' => 16, 'H' => 17, 'I' => 18, 'J' => 19,
+	'K' => 20, 'L' => 21, 'M' => 22, 'N' => 23, 'O' => 24,
+	'P' => 25, 'Q' => 26, 'R' => 27, 'S' => 28, 'T' => 29,
+	'U' => 30, 'V' => 31, 'W' => 32, 'X' => 33, 'Y' => 34,
+	'Z' => 35,	
+	# lowercase
+	'a' => 36, 'b' => 37, 'c' => 38, 'd' => 39, 'e' => 40,
+	'f' => 41, 'g' => 42, 'h' => 43, 'i' => 44, 'j' => 45,
+	'k' => 46, 'l' => 47, 'm' => 48, 'n' => 49, 'o' => 50,
+	'p' => 51, 'q' => 52, 'r' => 53, 's' => 54, 't' => 55,
+	'u' => 56, 'v' => 57, 'w' => 58, 'x' => 59, 'y' => 60,
+	'z' => 61,
+	# Other ASCII characters (this is not an exhaustive list, only includes a few symbols)
+	'-' => 96, '_' => 62, '!' => 63, '.' => 64, '"' => 65,			# Note: too lazy to totally reorganize this, so not
+	'#' => 66, '$' => 67, '%' => 68, '&' => 69, "\'" => 70,
+	'(' => 71, ')' => 72, '!' => 73, '.' => 74, '"' => 75,
+	'*' => 76, '+' => 77, ',' => 78, '/' => 79, ':' => 80,
+	';' => 81, '<' => 82, '>' => 83, '=' => 84, '?' => 85,
+	'@' => 86, '[' => 87, ']' => 88, "\\" => 89, '^' => 90,
+	'`' => 91, '{' => 92, '}' => 93, '|' => 94, '~' => 95,
+);
+
+# This hash is associated with the _indexToChar() subroutine, but it must be outside the subroutine scope to be maintainable and accessible.
+# It is automatically updated by _charToIndex()
+my %reverseCharIndex = (
+	# Numbers
+	'0' => '0', '1' => '1', '2' => '2', '3' => '3', '4' => '4',
+	'5' => '5', '6' => '6', '7' => '7', '8' => '8', '9' => '9',
+	# Uppercase
+	'10' => 'A', '11' => 'B', '12' => 'C', '13' => 'D', '14' => 'E',
+	'15' => 'F', '16' => 'G', '17' => 'H', '18' => 'I', '19' => 'J',
+	'20' => 'K', '21' => 'L', '22' => 'M', '23' => 'N', '24' => 'O',
+	'25' => 'P', '26' => 'Q', '27' => 'R', '28' => 'S', '29' => 'T',
+	'30' => 'U', '31' => 'V', '32' => 'W', '33' => 'X', '34' => 'Y',
+	'35' => 'Z',
+	# Lowercase
+	'36' => 'a', '37' => 'b', '38' => 'c', '39' => 'd', '40' => 'e',
+	'41' => 'f', '42' => 'g', '43' => 'h', '44' => 'i', '45' => 'j',
+	'46' => 'k', '47' => 'l', '48' => 'm', '49' => 'n', '50' => 'o',
+	'51' => 'p', '52' => 'q', '53' => 'r', '54' => 's', '55' => 't',
+	'56' => 'u', '57' => 'v', '58' => 'w', '59' => 'x', '60' => 'y',
+	'61' => 'z', 	
+	# Other ASCII characters (this is not an exhaustive list, only includes a few symbols)
+	'96' => '-', '62' => '_', '63' => '!', '64' => '.', '65' => '"',
+	'66' => '#', '67' => '$', '68' => '%', '69' => '&', '70' => "\'",
+	'71' => '(', '72' => ')', '73' => '!', '74' => '.', '75' => '"',
+	'76' => '*', '77' => '+', '78' => ',', '79' => '/', '80' => ':',
+	'81' => ';', '82' => '<', '83' => '>', '84' => '=', '85' => '?',
+	'86' => '@', '87' => '[', '88' => ']', '89' => "\\", '90' => '^',
+	'91' => '`', '92' => '{', '93' => '}', '94' => '|', '95' => '~',
+);
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Loop over the lines of the incoming data
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, go ahead and print those
+	if ( $cns == 1 && $. == 1 )		{
+		print $fhout "$_\n";
+		next;
+	}
+	
+	# Now operate element-wise over the rows and print
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	
+	# The main loop logic to do the base-n encoding/decoding
+	for ( my $i=0; $i < scalar @row; $i++ )		{
+		# If the data is recieved already as base-10 
+		# and we just want to encode it to some other base-n:
+		if ( $base_in == 10 )	{
+			$row[$i] = encode( $row[$i], $base_out );
+		}
+		# If the input data is not in base-10,
+		# then we need to convert to base-10 first 
+		# and then convert that to the output base-n
+		else 		{
+			$row[$i] = decode( $row[$i], $base_in );
+			$row[$i] = encode( $row[$i], $base_out );
+		}		
+	}
+	if ( $rns == 1 )	{	print $fhout "$rowname$sep", join("$sep", @row), "\n";		}
+	else				{	print $fhout join("$sep", @row), "\n";						}
+
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;
+
+
+#################################### SUBROUTINES ########################################
+
+sub encode		{
+	my ( $number, $base ) = @_;
+	my $baseN_number;
+	my $orig_number = $number;
+	while ( $orig_number > 1 )	{
+		my $remainder = $orig_number % $base;
+		$baseN_number .= "$reverseCharIndex{$remainder}";
+		$orig_number = int($orig_number / $base);
+	}
+	$baseN_number .= $reverseCharIndex{ int($orig_number) } if ( $orig_number >= 1 ); 			# Should be the final remainder once we have divided all we can
+	return 	reverse $baseN_number;	
+}
+
+
+sub decode 		{
+	my ( $number, $base ) = @_;
+	my $baseN_number;
+	my @orig_number = reverse( split('', $number) );
+	for ( my $j=0; $j < scalar @orig_number; $j++ )		{
+		$baseN_number += ($charIndex{ $orig_number[$j] } * ($base ** ($j)));
+	}
+	return $baseN_number;
+}

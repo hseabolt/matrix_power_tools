@@ -1,0 +1,234 @@
+#!/usr/bin/perl
+
+# bray-curtis.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-4-2021
+
+# SYNOPSIS:
+# Computes the Bray-Curtis Dissimilarity measure between all non-redundant pairs of samples in a data matrix.
+# Assumes that the incoming matrix has samples as rows and OTUs as columns.
+# Outputs a symmetrical, pairwise dissimilarity matrix.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use Storable qw(dclone);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+
+sub usage {
+	my $usage = "bray-curtis.pl\n
+	PURPOSE: Computes the Bray-Curtis Dissimilarity measure between all non-redundant pairs of samples in a data matrix.
+			Assumes that the incoming matrix has samples as rows and OTUs as columns.
+			Outputs a symmetrical, pairwise dissimilarity matrix.
+	\n
+	USAGE:	bray-curtis.pl -i read_counts.tab -o BC.tab
+	-i		input data matrix
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Operate on the matrix line-by-line to create a 2D matrix @M
+my @M = ();
+my @sample_names;			# The row names
+my @colnames;
+my %SampleSets;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+		push @sample_names, $rowname;
+	}
+	push @M, \@row;
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Set rownames if we dont have them
+if ( $rns == 0 )	{
+	for ( my $i=0; $i < scalar @M; $i++ )	{
+		my $tick = $i+1;
+		$sample_names[$i] = "V" . "$tick";
+	}
+}
+
+# Again for colnames
+if ( $cns == 0 )	{
+	for ( my $i=0; $i < scalar @{$M[0]}; $i++ )	{
+		my $tick = $i+1;
+		$colnames[$i] = "C" . "$tick";
+	}
+}
+
+##################################################################################
+# For each sample, build the set of OTUs it contains
+for ( my $i=0; $i < scalar @M; $i++ )	{
+	my $sample_name = $sample_names[$i];
+	for ( my $j=0; $j < scalar @{$M[$i]}; $j++ )	{
+		if ( $M[$i]->[$j] > 0 )	{
+			$SampleSets{$sample_name}{$colnames[$j]} = $M[$i]->[$j];
+		}
+	}
+}
+
+##################################################################################
+# Calculate dissimilarity between each pair of non-redundant samples
+my @BC;
+for ( my $i=0; $i < scalar @sample_names; $i++ )	{
+	for ( my $j=$i; $j < scalar @sample_names; $j++ )	{
+		
+		# Skip redundant pairs 
+		if ( $sample_names[$i] eq $sample_names[$j] )		{
+			$BC[$i]->[$j] = 0;
+			$BC[$j]->[$i] = 0;
+			next;
+		}
+		
+		# Get the pair of sets
+		my @SetA = keys %{$SampleSets{$sample_names[$i]}};
+		my @SetB = keys %{$SampleSets{$sample_names[$j]}};
+		
+		# Calculate the beta statistics
+		my $BrayCurtis = beta_diversity_BrayCurtis( $SampleSets{$sample_names[$i]}, $SampleSets{$sample_names[$j]} );
+		
+		# Save off the BC measure in the symmetrical matrix
+		$BC[$i]->[$j] = $BrayCurtis;
+		$BC[$j]->[$i] = $BrayCurtis;
+	}
+}
+
+##################################################################################
+# Print the results
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+print $fhout join("$sep", @sample_names), "\n" if ( $cns == 1 );
+for ( my $i=0; $i < scalar @BC; $i++ )	{
+	if ( $rns == 1 ) 	{ 	print $fhout join("$sep", $sample_names[$i], @{$BC[$i]}), "\n";		}
+	else 				{ 	print $fhout join("$sep", @{$BC[$i]}), "\n";						}
+}
+close $fhout if ( $succout );
+
+exit;
+
+################################### SUBROUTINES ####################################
+
+# The Bray-Curtis Dissimilarity *BC* calculated as
+#                  2*Cij
+#          1 - --------------
+#                 Si + Sj
+# Where Si and Sj are the total number of individuals (N) per sample for Sample i and Sample j,
+# And Cij is the sum of the lesser values of the species common to both samples.
+sub beta_diversity_BrayCurtis	{
+	my ( $SetA, $SetB ) = @_;
+	
+	my $Si = sum( values %{$SetA} );
+	my $Sj = sum ( values %{$SetB} );
+	return "1" if ( $Si == 0 || $Sj == 0 );		# Quick checkpoint
+
+	# Get the intersection of species common to both samples
+	my @A = keys %{$SetA}; my @B = keys %{$SetB};
+	my @isec = @{intersection( \@A, \@B )};
+	
+	# For each species in common, get the lesser value
+	my @lesser_values;
+	foreach my $taxon ( @isec )		{
+		my $lesser = ( $SetA->{$taxon} <= $SetB->{$taxon} )? $SetA->{$taxon} : $SetB->{$taxon};
+		push @lesser_values, $lesser;
+	}
+	
+	 #Calculate the Bray-Curtis Dissimilarity (should range from 0 to 1.
+	 my $BC = 1 - ((2 * sum(@lesser_values)) / ($Si + $Sj));
+	 return $BC;
+}
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+# Set intersection of two sets
+sub intersection	{
+	my ( $SetA, $SetB ) = @_;
+	my @isec;
+	my %Union = ();
+	$Union{$_} = 1 foreach ( @{$SetA} );
+	foreach my $element ( @{$SetB} ) {
+		push @isec, $element if ( exists $Union{$element} );
+	}
+	return \@isec;
+}
+
+# Set union of two sets
+sub union	{
+	my ( $SetA, $SetB ) = @_;
+	my %Union = ();
+	$Union{$_} = 1 foreach ( @{$SetA} );
+	$Union{$_} = 1 foreach ( @{$SetB} );	
+	return keys %Union;
+}

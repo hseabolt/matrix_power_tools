@@ -1,0 +1,260 @@
+#!/usr/bin/perl
+
+# floyd-warshall.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Computes the all pairs shortest path distances from an input graph adjacency matrix using the Floyd-Warshall algorithm.
+# Adjacency matrices can be directed or not. 
+# Output can be either a distance matrix with shortest path lengths (default) or the path itself from a start to an end vertex.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "floyd-warshall.pl v0.1.0\n
+	PURPOSE: Computes the all pairs shortest path distances from an input graph adjacency matrix using the Floyd-Warshall algorithm.
+			Adjacency matrices can be directed or not. Output can be either a distance matrix with shortest path lengths (default) or
+			the path itself from a start to an end vertex.
+
+			NOTE: The Floyd-Warshall algorithm is O(n^3) and computation will take a long time for very large matrices!
+	\n
+	USAGE:	floyd-warshall.pl -i adj.tab -o apsp.tab
+	-i		input graph adjacency matrix
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-f 		STR; desired output type (either dist [Default] or paths).
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /(?im)paths/ )? "paths" : "dist";
+
+##################################################################################
+# Read the adjacency matrix
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @P;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}
+	push @P, \@row;
+}
+close $fh if ( $succin );
+
+# Sanity check --> do we have a square adjacency matrix?
+die "floyd-warshall::ERROR --> input adjacency matrix is not square!\n" if ( scalar @P != scalar @{$P[0]} );
+
+# Open and set the output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Implementation of the Floyd-Warshall algorithm to compute all pairs shortest paths.
+# The graph does not have to be connected, treats paths in such cases as "inf"
+
+# Note to the next person who isn't me to read/review this code: this is old code from a prior project I worked on years ago.
+# I freely admit that at the time of writing this, I was too lazy to refactor this working code to make small improvements
+# in performance or generally cleaning it up, it is just copy/pasted straight in with very minor modifications. 
+# If if aint broke, I didnt fix it :)
+
+# Initialize an enumeration of indices using the vertex names
+	my %Indices;
+	for ( my $i = 0; $i < scalar @rownames; $i++ )	{
+		my $node = $rownames[$i];
+		$Indices{$i} = $node;
+		$Indices{$node} = $i;
+	}
+
+# Compute the Floyd-Warshall algorithm and return the paths and the distances
+my ( $paths, $traceback ) = floydwarshall( @P );
+my %FloydShortestPaths = %{$paths};
+my @Traceback = @{$traceback};
+
+# Print the All Pairs distance matrix if that output was requested
+if ( $method eq "dist" )	{
+	print $fhout join("$sep", @rownames), "\n" if ( $cns == 1 );
+	for ( my $i=0; $i < scalar @rownames; $i++ ) 	{
+		my $outerkey = $rownames[$i];
+		my %Inner = %{ $FloydShortestPaths{$outerkey} };
+		my @inners;
+		foreach my $innerkey ( sort keys %Inner )	{
+			push @inners, $Inner{$innerkey};
+		}
+		if ( $rns == 1 )	{	print $fhout join("$sep", $outerkey, @inners), "\n";	}
+		else 				{	print $fhout join("$sep", @inners), "\n";				}
+	}
+}
+# Otherwise, generate a table with the shortest paths themselves as a series of nodes
+# where outer key = source node // inner key = end node // value = the path as an anon array
+elsif ( $method eq "paths" )	{
+	print $fhout join("$sep", "Source", "End", "ShortestPath"), "\n" if ( $cns == 1 );
+	for ( my $i=0; $i < scalar @rownames; $i++ )	{
+		for ( my $j=0; $j < scalar @rownames; $j++ )	{
+			my @path = @{ get_path( $i, $j ) };
+			print $fhout join("$sep", $rownames[$i], $rownames[$j], join(",", @path)), "\n";
+		}
+	}
+}
+close $fhout if ( $succout );
+
+exit;
+
+############################### SUBROUTINES #######################################
+
+
+# Floyd-Warshall algorithm
+sub floydwarshall	{
+	my ( @M ) = @_;
+	my $n = scalar @M;
+
+	# Initialize an empty HoH to store the length of the shortest paths
+	# AND an empty matrix to hold traceback data
+	my %FloydShortestPaths = ();
+	my @Traceback;
+	
+	# Set all cells in the traceback matrix to 0
+	for ( my $i=0; $i < $n; $i++ )	{
+		for ( my $j=0; $j < $n; $j++ )	{
+			$Traceback[$i]->[$j] = 0;
+		}
+	}
+	
+	foreach my $i ( 0..$n-1 )	{
+		foreach my $j ( 0..$n-1 )	{
+			$Traceback[$i]->[$j] = $i;
+			
+			if ( $i != $j && $M[$i][$j] == 0 )	{
+				$Traceback[$i]->[$j] = "inf";
+				$M[$i][$j] = "inf";
+			}
+		}
+	}
+	
+	# Set up the Floyd-Warshall nested loops:
+	# Use the indices we set up in the enumeration to act as the keys for the ShortestPaths HoH
+	foreach my $k ( 0..$n-1 )	{
+		my $kX = $Indices{$k};
+		foreach my $i ( 0..$n-1 )	{
+			my $iX = $Indices{$i};
+			foreach my $j ( 0..$n-1 )	{
+				my $jX = $Indices{$j};
+				if ( $M[$i][$j] > $M[$i][$k] + $M[$k][$j] )	{
+					$FloydShortestPaths{$iX}{$jX} = $M[$i][$k] + $M[$k][$j];
+					$Traceback[$i]->[$j] = $Traceback[$k]->[$j];
+					$M[$i][$j] = $M[$i][$k] + $M[$k][$j];
+				}
+				else		{
+					$FloydShortestPaths{$iX}{$jX} = $M[$i][$j];
+					$Traceback[$i]->[$j] = $Traceback[$i]->[$j];
+				}
+			}
+		}
+	}
+	return ( \%FloydShortestPaths, \@Traceback );
+}
+
+
+# Traces back the sequence of nodes from source --> nodeX using the Traceback matrix built
+# in the Floyd-Warshall subroutine
+sub get_path	{
+	my ( $i, $j ) = @_;
+	my @path = ( $rownames[$j] );
+	
+	while ( $path[-1] ne $rownames[$i] ) 	{
+		if ( $i == $j )		{	
+			push @path, $rownames[$i];
+		}
+		elsif ( $Traceback[$i]->[$j] == "inf" ) 	{
+			push @path, "<NA>";		
+		}
+		else	{
+			push @path, $rownames[ $Traceback[$i]->[$j] ];
+			$j = $Traceback[$i]->[$j];
+		}
+	}
+	@path = reverse @path;
+	return \@path;
+}
+
+# Accepts the path as an array reference and transforms it from a numerical list of nodes into the names of the nodes in order.
+sub print_path	{
+	my ( $path ) = @_;
+	my @pathZ = @{$path};
+	my @pathY;
+	
+	foreach my $node ( @pathZ )	{
+		my $vertex = $Indices{$node};
+		push @pathY, $vertex;
+	}
+	
+	return \@pathY;
+}

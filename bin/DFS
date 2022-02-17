@@ -1,0 +1,172 @@
+#!/usr/bin/perl
+
+# DFS.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Computes a depth first search of a graph adjacency matrix.
+# Prints each node in the order that it was visited, optionally pre-order, post-order, in-order.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $source;
+my $order = "pre";
+
+sub usage {
+	my $usage = "DFS.pl v0.1.0\n
+	PURPOSE: Computes a breadth first search of a graph adjacency matrix and prints each node in the order that it was visited, optionally pre-order [Default], post-order, in-order.
+	\n
+	USAGE:	DFS -i adjMatrix.tab -o order.tab
+	-i		input graph adjacency matrix
+	-o 		output file name 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-b 		STR; node to begin the DFS at (the source node)? ( Default: random node )
+	-p 		STR; order to print the traversal: one of 'pre', 'post', 'in-order'.  ( Default: pre )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'source|b=s' => \$source,
+			'order|p=s' => \$order,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$order = ( $order =~ /(im?)post/ )? "post" : ( $order =~ /(im?)in/ )? "in" : "pre";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Read in the graph adjacency matrix
+my %G;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Column name handling
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		$G{$_} = [] foreach ( @colnames );
+		next;
+	}
+	
+	# Row operations
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+	}
+	else 	{
+		my $tick = ( $cns == 1 )? $. - 1 : $.;
+		$rowname = "V" . "$tick";
+	}
+	
+	if ( scalar @colnames == 0 )	{
+		for ( my $j=0; $j < scalar @row; $j++ )	{
+			my $tick = $. + $j;
+			$colnames[$j] = "V" . "$tick";
+		}
+	}
+	
+	for ( my $i=0; $i < scalar @row; $i++ )		{
+		push @{$G{$rowname}}, $colnames[$i] if ( $row[$i] != 0 && $rowname ne $colnames[$i] );		 # Assumes any value other than 0 is an edge weight and disallows cycles
+	}
+}
+close $fh if ( $succin );
+
+# Compute the BFS
+$source = ( $source )? $source : (keys %G)[0];
+print $fhout join("$sep", @{ DFS($source, $order) }), "\n";
+
+exit;
+
+################################# SUBROUTINES #################################################
+
+# Depth-first search of the markov chain
+# Returns an array reference containing either the pre- or post-ordered names of the nodes (tree-edges only, not cross/forward/back edges)
+sub DFS		{
+	my ( $src, $type ) = @_;
+	my @queue = ($src);
+	my %Seen = ();
+	my @order;
+	my @visited_children = ($src);
+	
+	while( scalar( @queue ) > 0 )	{
+		my $vertex = pop( @queue ); 
+		push @order, $vertex if ( not exists($Seen{$vertex}) && $type eq "pre" );			
+		my @neighbors = @{ $G{$vertex} };
+		
+		# Add the neighbors to the queue and update some information about the current node
+		foreach my $child ( @neighbors )	{
+			push @visited_children, $child;
+			if ( exists $Seen{$child} )	{
+				next;
+			}
+			push @queue, $child;
+		}
+		
+		# Add the current vertex to %Seen
+		$Seen{$vertex} = 1;
+	}
+	
+	# Return the ordering requested --> note: currently only produces a pre-order traversal.
+	return \@order; 			
+}

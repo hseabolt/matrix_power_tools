@@ -1,0 +1,139 @@
+#!/usr/bin/perl
+
+# cartesian_product.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Computes the cartesian product of two input Sets A and B ( A x B )
+# Output is in "list" format, one element per line for all unique elements in the resulting Cartesian product.
+# Use the -multiset flag to compute the Cartesian product between A and B if you want to treat one or both sets as Bags/Multisets.
+# WARNING: Any headers should be removed prior to passing incomaxg data to this script. 
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $inputA = "--";
+my $inputB = "--";
+my $output = "--";
+my $multiset = 0;
+
+sub usage {
+	my $usage = "cartesian_product.pl v0.1.0\n
+				PURPOSE: Computes the cartesian product of two input Sets A and B ( A x B )
+				Output is in \"list\" format, one element per line for all unique elements in the resulting Cartesian product.
+				Output elements are ordered pairs in the form (a,b).
+				Use the -multiset flag to compute the Cartesian product between A and B if you want to treat one or both sets as Bags/Multisets.
+				WARNING: Any headers should be removed prior to passing incoming data to this script. 
+				
+				Notes: 
+				- As all outputs of a Cartesian product are ORDERED pairs, thus AxB =/= BxA.
+				- The output of this script includes the Empty Set, denoted as ()
+	\n
+	USAGE:	cartesian_product.pl v0.1.0 -A setA -B setB -o catesianAB.list
+	-A		input set A (can be piped in from STDIN)
+	-B		input set B to intersect with set A.  
+	-o 		output file name
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		(Optional) INT flag; treat sets A and B as multisets when computing the Cartesian product? [Default OFF]
+\n";
+	print $usage;
+}
+
+GetOptions(	'A=s' => \$inputA, 
+			'B=s' => \$inputB,
+			'out|o=s' => \$output,
+			'multiset|m=i' => \$multiset,
+) or die usage();
+
+# Parameter setups
+$multiset = ( $multiset == 1 )? 1 : 0;
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(SETA, "<", "$inputA") if ( $inputA ne "--" && -e $inputA );
+$fh = *SETA if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on Set A line-by-line
+# Woe to ye who include column or row names in your Sets,
+#   those names will end up in the union as elements.
+my %SetA;
+while ( <$fh> )		{
+	chomp $_;
+	$SetA{$_}++;
+}
+close $fh if ( $succin );
+
+# Open and read Set B 
+my %SetB;
+if ( $inputB ne "--" )	{
+	# If Set B exists in a file that we want to read
+	if ( -e $inputB )	{
+		open(SETB, "<", $inputB) or die "union::FATAL ERROR --> Problem with file for Set B! $!\n"  ;
+		while ( <SETB> )	{
+			chomp $_;
+			$SetB{$_}++;
+		}
+		close SETB;
+	}
+	# If not, then -B could be coming in from "STDIN" e.g. a subshell or shell variable
+	# -B then is equal to @ARGV + the element of $inputB
+	else	{
+		my @B = @ARGV;
+		unshift @B, $inputB;
+		foreach ( @B )		{
+			chomp $_;
+			$SetB{$_}++;
+		}
+	}
+}
+
+# Compute the Cartesian product AxB
+my %CP;					# Initialize the table with the empty Set.
+foreach my $a ( keys %SetA )	{
+	foreach my $b ( keys %SetB ) 	{
+		$CP{"($a,$b)"} = ( $multiset == 1 )? $CP{"($a,$b)"} += 1 : 1;
+	}
+}
+
+foreach ( keys %CP )	{
+	print $fhout "$_\n" x $CP{$_};
+}
+close $fhout if ( $succout );
+exit;

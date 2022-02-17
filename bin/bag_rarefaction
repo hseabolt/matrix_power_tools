@@ -1,0 +1,262 @@
+#!/usr/bin/perl
+
+# bag_rarefaction.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-11-2021
+
+# SYNOPSIS:
+# Accepts list of data each treated as discrete objects and possibly containing duplicates (aka a MultiSet/Bag), computes a rarefaction (aka species discovery or collector's) curve from the Bag
+# for a specified number of permutations, and returns the average value and variance for each iteration.
+
+# The choose() subroutine is transfered as-is from the book "Mastering Algorithms with Perl"
+# Citation: Orwant, J., Hietaniemi, J., Macdonald, J., & MacDonald, J. D. (1999). Mastering algorithms with Perl. "O'Reilly Media, Inc.".
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use List::Util qw(shuffle);
+
+use Data::Dumper;
+
+# Required input parameters
+my $input = "--";
+my $output = "--";
+my $sep = "\t";
+my $nperm;
+my $start;
+my $stop;
+my $step;
+my $name;
+
+sub usage {
+	my $usage = "bag_rarefaction v0.1.0\n
+	PURPOSE: Accepts list of data each treated as discrete objects and possibly containing duplicates (aka a MultiSet/Bag), 
+		computes a rarefaction (aka species discovery or collector's) curve from the Bag for a specified number 
+		of permutations, and returns the average value and variance for each iteration. 
+		Any headers should be removed prior to passing incoming data to this script.
+			
+			
+			
+	USAGE:	bag_rarefaction v0.1.0 -i bag.list -o rare.bag.tab
+	-i	input bag/multiset data, one object per line.
+	-o 	output file name
+	-n 	sample name to include in the report
+	
+	=== RESAMPLING PARAMETERS ===
+	-r 			INT; number of permutations to compute the rarefaction curve? [ Default: 1000 ];
+	-start 		positive INT; minimum size of a resample to report [ Default: 0 ]
+	-stop 		positive INT; maximum size of a resample to report [ Default: total sample size ]
+	-step 		positive INT; increment sample sizes by this much [ Default: 1 ]
+	
+	WARNING: Computing rarefaction curves involves random resampling without replacement (aka jackknifing) of the original data,
+	and is computationally expensive as the size of the input data grows.  Be prepared to wait if your data is very large.
+	Strongly recomend tweaking the -step parameter if your data set is large, so you will not waste time computing infinitely many tiny increments.
+	
+	\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input,
+			'out|o=s' => \$output,
+			'sep|s=s' => \$sep,
+			'nperm|r=i' => \$nperm,
+			'name|n=s' => \$name,
+			'start=i' => \$start,
+			'stop=i' => \$stop,
+			'step=i' => \$step,
+) or die usage();
+
+# Parameter setups
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$nperm = ( $nperm && $nperm >= 1 )? $nperm : 1000;
+$name = ( $name )? $name : ( -e $input && $input ne "--" )? $input : "Sample1";
+
+##################################################################################
+# Read the input data file, expecting a "list" with one object per line
+my $fh = *STDIN;
+my $succin = open(SET, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *SET if ( $succin ); 
+
+# Operate on the input line-by-line
+# Woe to ye who include column or row names in your Sets,
+#   those names will end up in the union as elements.
+my @Set;
+while ( <$fh> )		{
+	chomp $_;
+	push @Set, $_;
+}
+close $fh if ( $succin );
+
+#####################################################################################
+# Set up the parameters of the for loop
+$start = ( $start && $start >= 1 )? $start : 1;
+$stop = ( $stop && $stop >= 1 )? $stop: scalar @Set;
+$step = ( $step && $step >= 1 )? $step : 1;
+( $start, $stop ) = ( $stop, $start ) if ( $start > $stop );
+my $bins = int(( $stop - $start ) / $step);
+
+# Compute N replicates per sampling size
+# To optimize this a bit for speend, the strategy here is to shuffle the input data list 
+# to randomize the order and then take the first $i elements.  Repeat this $nperm times.	
+my $r = 1;
+my %Counts = ();
+while ( $r <= $nperm )		{
+
+	# Shuffle the list and get the first $i elements (in the for loop below), tally them into a hash %Jackknife
+	@Set = shuffle @Set;
+
+	# The inner for loop to handle different permutation sizes
+	my $c = 1;
+	for ( my $i=$start; $i <= $stop; $i+=$step )	{	
+	
+		# Just a nice checkpoint to print to the screen
+		print STDERR "Sample: $name  --  Size: $c / $bins  --  Nperms: $r / $nperm\r"; # if ( $i % 100 == 0 );
+		
+		# Tally the resampled data
+		my %Jackknife = ();
+		$Jackknife{ $Set[$_] }++ foreach ( 0 .. ($i-1) );
+
+		# Add the count to a list of counts
+		push @{$Counts{$i}}, scalar keys %Jackknife;
+
+		# Sanity check --> is our next sample size larger than the input Set?  Break this loop if yes.
+		last if ( $i+$step >= scalar @Set );
+
+		# Incremenet $c
+		$c++;
+	}
+	
+	# Increment $r
+	$r++;
+}
+
+####################################################################################
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+print $fhout join("$sep", "SAMPLE_SIZE", "MEAN_UNIQUE_OTUS", "STDEV_UNIQUE_OTUS", "SAMPLE_NAME", "LOW", "HIGH"), "\n";
+
+for ( my $i=$start; $i <= $stop; $i+=$step )	{	
+	# Calculate some statistics
+	my $mean = mean(@{$Counts{$i}});
+	my $stdev = sqrt(variance(@{$Counts{$i}}));
+	
+	# Print out the data for this sample size
+	# Output format is:  SAMPLE_SIZE    MEAN_UNIQUE_OTUS    STDEV_UNIQUE_OTUS    SAMPLE_NAME
+	print $fhout join("$sep", $i, sprintf("%3.4f", $mean), sprintf("%3.4f", $stdev), $name, sprintf("%3.4f", $mean - $stdev), sprintf("%3.4f", $mean + $stdev)), "\n";
+	
+	# Sanity check
+	last if ( $i+$step >= scalar @Set );
+}
+close $fhout if ( $succout );
+
+exit;
+
+############################## SUBROUTINES ###################################
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+# Calculates the mean of a list
+sub mean 	{
+	return sum(@_)/@_;
+}
+
+# Calculate the variance from a list
+sub variance	{
+	my @data = @_;
+	return 0 if ( @data == 1 ); 
+	my $mean = mean(@data);
+	my $var = 0;
+	$var += ( $_ - $mean ) ** 2 foreach ( @data );
+	$var = ( $var / scalar @data );
+	return $var;
+}
+
+
+
+
+# # Compute N replicates per sampling size
+# # To optimize this a bit for speend, the strategy here is to shuffle the input data list 
+# #to randomize the order and then take the first $i elements.  Repeat this $nperm times.
+# for ( my $i=$start; $i <= $stop; $i+=$step )	{
+
+	# # Initialize a list of counts of unique OTUs per replicate
+	# my @counts;
+
+	# # Randomly resample a given proportion of the data without replacement and count the number of unique items in the random sample.
+	# # Report out this unique counting data as follows:  
+	# my $r = 1;
+	# my $c = 1;
+	# while ( $r <= $nperm )		{
+		
+		# # Shuffle the list and get the first $i elements (in the for loop below), tally them into a hash %Jackknife
+		# @Set = shuffle @Set;
+		
+		# print "$_\n" foreach (@Set);
+		# exit;
+	
+		# # Just a nice checkpoint to print to the screen
+		# #print STDERR "Sample: $name  --  Size: $c / $bins  --  Nperms: $r / $nperm\r"; # if ( $i % 100 == 0 );
+		
+		# # Tally the resampled data
+		# my %Jackknife = ();
+		# $Jackknife{ $Set[$_] }++ foreach ( 0 .. ($i-1) );
+
+		# # Add the count to a list of counts
+		
+		# push @counts, scalar keys %Jackknife;
+
+		# # Increment $r
+		# $r++;
+	# }
+	
+	# # Calculate some statistics
+	# my $mean = mean(@counts);
+	# my $stdev = sqrt(variance(@counts));
+	
+	# # Print out the data for this sample size
+	# # Output format is:  SAMPLE_SIZE    MEAN_UNIQUE_OTUS    STDEV_UNIQUE_OTUS    SAMPLE_NAME
+	# print $fhout join("$sep", $i-1, sprintf("%3.4f", $mean), sprintf("%3.4f", $stdev), $name, sprintf("%3.4f", $mean - $stdev), sprintf("%3.4f", $mean + $stdev)), "\n";
+	
+	# # Sanity check --> is our next sample size larger than the input Set?  Break this loop if yes.
+	# last if ( $i+$step >= scalar @Set );
+	
+	# # Incremenet $c
+	# $c++;
+# }
+# close $fhout if ( $succout );

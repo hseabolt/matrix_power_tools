@@ -1,0 +1,386 @@
+#!/usr/bin/perl
+
+# gearyC.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Computes Geary's C coefficient of spatial autocorrelation given an input numeric data matrix and a matrix of weights.
+# Output is in TABLE format with the following columns:  	Obs  Exp  Variance  Z-score  P-value  Significance
+# Alpha = 0.05 for significance testing
+
+# Note: to extend this method to distance classes (aka k-nearest neighbors, set up a wrapper script with a loop to regenerate the weights matrix for each distance class
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use List::Util qw(shuffle);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $weights = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $nrepet = 1;
+
+sub usage {
+	my $usage = "gearyC.pl v0.1.0\n
+	PURPOSE: Computes Geary's C coefficient of spatial autocorrelation given an input list of numeric relational data (e.g. correlation coefficients), and
+			a matrix of spatial weights (often a nidirectional SYMMETRIC adjacency matrix where the values are 1 if two nodes are neighbors and 0 otherwise).
+			Output is in TABLE format with the following columns:  	Obs  Exp  Stdev  Z-score  P-value  Significance
+			
+			Note:Alpha = 0.05 for significance testing
+	\n
+	USAGE:	gearyC.pl v0.1.0 -i data.distances.tab -w weights.tab -o gearyC.tab
+	-i		input pairwise distance matrix data (can be piped in from STDIN)
+	-w 		input weights matrix, typically a binary-encoded adjacency matrix.  Must have same dimensions and format as -input.  
+				--> Cells in --weights should correspond to the same cells in --input!
+				--> The statistical test computed assumes that the weights matrix is symmetrical!
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-n 		INT; number of randomized resampling iterations to compute? ( Default: 1 )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'weights|w=s' => \$weights,
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'nrepet|n=i' => \$nrepet,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$nrepet = ( $nrepet >= 1 )? $nrepet : 1;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Go ahead and print the header line, if we want it
+print $fhout join("$sep", "Iter", "Obs(C)", "Exp(C)", "Stdev", "Zscore", "p-value", "Significance"), "\n" if ( $cns == 1 );
+
+##################################################################################
+# Read in the pairwise distance matrix
+my @list;
+my $N = 0;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+		push @rownames, $rowname;
+	}
+
+	# Update $N
+	$N += scalar @row;
+	
+	# Add the row to the list @P
+	push @list, $_ foreach (@row);
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Read in the weights matrix, calling it @Wij
+my @Wij;
+my $W = 0;
+open(WEIGHTS, "<", $weights) or die "gearyC::FATAL ERROR --> Problem with input file for --weights! $!\n";
+while ( <WEIGHTS> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+	}
+	
+	# Add the row sum to $W
+	$W += sum(@row);
+	
+	# Add the row to the adjacency matrix @Wij
+	push @Wij, \@row;
+}
+close WEIGHTS;
+
+# Sanity check --> make sure that the diagonal of @Wij is set to 0
+for ( my $i=0; $i < scalar @Wij; $i++ )		{
+	$Wij[$i]->[$i] = 0;
+}
+
+# Sanity check --> @Weights must have as many rows as $list
+die "gearyC::ERROR --> Weights matrix must have as many rows as elements in --input list of values!\n" if ( scalar @Wij != scalar @list );
+
+##################################################################################
+# Calculate the "true" observed I statistic
+
+# Geary's C is defined as follows (per Wikipedia)
+#
+#       N-1     SumI[ Sumj [ wij (xi - xj) ]]
+#  C = ------  --------------------------------
+#       2W           SumI[ (xi - xbar)^2 ]
+#
+# where N is the number of spatial units indexed by i and j; x is the variable of interest; xbar is the mean of x; Wij is a matrix of spatial weights with zeroes on the diagonal; and W is the sum of all Wij
+
+# The mean of the input data
+my $xbar = mean(@list);
+
+# Compute the numberator for C
+my $obs_num_sum = 0;
+
+# Compute the denominator for C
+my $obs_den_sum = 0;
+for ( my $i=0; $i < scalar @list; $i++ )	{
+	$obs_den_sum += ($list[$i] - $xbar)**2;
+	for ( my $j=0; $j < scalar @list; $j++ )	{
+		$obs_num_sum += $Wij[$i]->[$j] * ($list[$i] - $list[$j])**2;
+	}
+}
+
+# Finally, compute C itself
+my $C = (($N-1)/(2*$W)) * ( $obs_num_sum / $obs_den_sum );
+
+##################################################################################
+# Calculate expected value of C and the variance ( follows formulas given here: http://ceadserv1.nku.edu/longa//geomed/ppa/doc/globals/Globals.html )
+my $expected = 1;		# Expected value of C is 1.
+
+# Variance is a bit more complicated here and requires us to compute several additional terms S1, S2, and K
+
+###############
+# S1
+my $S1 = 0;
+for ( my $i=0; $i < scalar @Wij; $i++ )	{
+	for ( my $j=0; $j < scalar @{$Wij[0]}; $j++ )	{
+		$S1 += ( $Wij[$i]->[$j] + $Wij[$j]->[$i] )**2
+	}
+}
+$S1 *= 0.5;
+
+###############
+# S2
+my $S2 = 0;
+for ( my $i=0; $i < scalar @Wij; $i++ )	{
+	my $rowsum = 0;
+	my $colsum = 0;
+	for ( my $j=0; $j < scalar @{$Wij[0]}; $j++ )	{
+		$rowsum += $Wij[$i]->[$j];
+		$colsum += $Wij[$j]->[$i];
+	}
+	$S2 += ($rowsum + $colsum)**2;
+}
+
+###############
+# S3 == kurtosis
+my $s3_num_sum = 0;
+my $s3_den_sum = 0;
+for ( my $i=0; $i < scalar @list; $i++ )	{
+	$s3_num_sum += ($list[$i] - $xbar)**4;
+	$s3_den_sum += ($list[$i] - $xbar)**2;
+}
+my $K = ((1/$N) * $s3_num_sum) / ( ((1/$N) * $s3_den_sum)**2 );
+
+# Finally, compute the variance --> wow what a nasty formula
+my $variance =  ( ($W**2)*(($N**2 - 3) - $K*($N-1)**2) + $S1*($N-1)*($N**2 - 3*$N + 3 - $K*($N-1)) + (1/4)*($W**2)*($N-1)*($K*($N**2 - $N + 2) - ($N**2 + 3*$N - 6)) ) / (($N)*($N-2)*($N-3)*($W**2)) ;
+
+
+# Calculate the z-score (obs - expected/stdev)
+# Sanity check --> does $variance == 0 ?
+my $z = ( $variance == 0 )? "<NA>" : ( $C - $expected ) / sqrt($variance);
+
+# Calculate p-value from z-scores (this is a two-tailed Z-test)
+# Formula for p-value: p = 2 * phi( |z| ) )
+my $p = ( $z eq "<NA>" )? "<NA>" : 2 * phi(-$z);
+
+# Generate a silly little significance marker
+my $sig = "";
+if    ( $p <= 0.05  )	{	$sig = "*";		}
+elsif ( $p <= 0.01  )	{	$sig = "**";	}
+elsif ( $p <= 0.001 )	{	$sig = "***";	}
+
+
+# Save off the "true" data
+my @trueC = ( $C, $expected, sprintf("%3.4f",sqrt($variance)), sprintf("%3.4f",$z), sprintf("%3.6f",$p), $sig );
+
+##################################################################################
+# Compute the randomization test --> this will produce a randomized distribution
+# centered around the mean of the null hypothesis ($expected) and have variance $variance.
+# To compute a psuedo p-value from this null distribution, divide the number of recomputed I statistics
+# that are greater than or equal to the "true" I computed above, and divide this total by the number of permutations.
+my $r = 1;
+my @Cs;
+while ( $r < $nrepet )		{
+	
+	# Shuffle the data
+	@list = shuffle(@list);
+	
+	# Compute the numberator for C
+	my $obs_num_sum = 0;
+
+	# Compute the denominator for C
+	my $obs_den_sum = 0;
+	for ( my $i=0; $i < scalar @list; $i++ )	{
+		$obs_den_sum += ($list[$i] - $xbar)**2;
+		for ( my $j=0; $j < scalar @list; $j++ )	{
+			$obs_num_sum += $Wij[$i]->[$j] * ($list[$i] - $list[$j])**2;
+		}
+	}
+
+	# Finally, compute C itself
+	my $obs = (($N-1)/(2*$W)) * ( $obs_num_sum / $obs_den_sum );
+	
+	# Calculate the z-score (obs - expected/stdev)
+	# Sanity check --> does $variance == 0 ?
+	my $z = ( $variance == 0 )? "<NA>" : ( $obs - $expected ) / sqrt($variance);
+
+	# Calculate p-value from z-scores (this is a two-tailed Z-test)
+	# Formula for p-value: p = 2 * phi( |z| ) )
+	my $p = ( $z eq "<NA>" )? "<NA>" : 2 * phi(-$z);
+
+	# Generate a silly little significance marker
+	my $sig = "";
+	if    ( $p <= 0.05  )	{	$sig = "*";		}
+	elsif ( $p <= 0.01  )	{	$sig = "**";	}
+	elsif ( $p <= 0.001 )	{	$sig = "***";	}
+
+	# Push the data to the list, print the results, and increment $r
+	my @iteration = ( $obs, $expected, sprintf("%3.4f",sqrt($variance)), sprintf("%3.4f",$z), sprintf("%3.6f",$p), $sig );
+	push @Cs, \@iteration; 
+	print $fhout join("$sep", $r, $obs, $expected, sprintf("%3.4f",sqrt($variance)), sprintf("%3.4f",$z), sprintf("%3.6f",$p), $sig), "\n";
+	$r++;
+}
+
+##################################################################################
+# Print the results
+print $fhout join("$sep", "OBS", @trueC), "\n";
+
+# Compute the average values from the randomized bootstraps
+if ( $nrepet > 1 )	{
+	@Cs = @{ transpose(@Cs) };
+	my $mean_exp = mean(@{$Cs[0]});
+	
+	# Compute the sample stdev from the reference distribution 
+	# Formula can be found here: https://webfocusinfocenter.informationbuilders.com/wfappent/TL5s/TL_lang/source/stddev.htm
+	# This is a sample, not a population, so the 1/N divisor is actually N-1
+	my $residuals = 0;
+	for ( my $i=0; $i < scalar @{$Cs[0]}; $i++ )	{
+		$residuals += ($Cs[0]->[$i] - $mean_exp)**2
+	}
+	my $stdev = sqrt( (1/(scalar @{$Cs[0]})) * $residuals );
+	
+	# Calculate the z-score from the reference distribution and the observed I statistic
+	my $final_z = ($stdev == 0 )? "<NA>" : ( $trueC[0] - $mean_exp ) / $stdev;
+	
+	# Calculate the pseudo p-value
+	my $final_p = ( $z eq "<NA>" )? "<NA>" : 2 * phi(-$z);
+
+	my $final_sig = "";
+	if    ( $final_p <= 0.05  )	{	$final_sig = "*";	}
+	elsif ( $final_p <= 0.01  )	{	$final_sig = "**";	}
+	elsif ( $final_p <= 0.001 )	{	$final_sig = "***";	}
+
+	# Print output results
+	print $fhout join("$sep", "RAND", $C, $mean_exp, sprintf("%3.4f",$stdev), sprintf("%3.4f",$final_z), sprintf("%3.6f",$final_p), $final_sig), "\n";
+}
+close $fhout if ( $succout );
+
+exit;
+
+######################### SUBROUTINES ##################################
+
+
+sub mean	{ 	
+	return sum(@_)/@_;
+}
+
+sub sum	{
+	my ( @data ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @data );	
+	return $sum;
+}
+
+# CDF of normal distribution -- for calculating p-values
+sub phi		{
+	my ( $zscore ) = @_;
+	
+	my $t = 1.0/(1.0 + 0.2316419*abs($zscore));
+	my $y = $t*(0.319381530
+			+ $t*(-0.356563782
+				+ $t*(1.781477937
+					+ $t*(-1.821255978
+						+ $t*1.330274429 ))));
+		
+	 return pdf( $zscore )*$y;
+}
+
+sub pdf {
+	my ( $u ) = @_;
+	my $SQRT2PI = 2.50662827463;
+	return exp( -0.5 * $u*$u ) / $SQRT2PI;
+}
+
+# Tranpose a matrix
+sub transpose		{
+	my ( @matrix ) = @_;
+	my $matrix_t = [ ];
+	for ( my $i=0; $i < scalar @matrix; $i++ )	{
+		for ( my $j=0; $j < scalar @{$matrix[0]}; $j++ )	{
+		$matrix_t->[$j]->[$i] = $matrix[$i]->[$j];
+		}
+	}	
+	return $matrix_t;
+}
