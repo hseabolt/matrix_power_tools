@@ -1,0 +1,117 @@
+#!/usr/bin/perl
+
+# table2list.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Reads a 2-column table and converts it to a list of elements.  
+# Each element will be included in the output list equal to its frequency in the table.
+# A header is optional, but assumed to be absent.
+
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 0;
+my $sep;
+
+sub usage {
+	my $usage = "table2list.pl v0.1.0\n
+	PURPOSE: Reads a 2-column table and converts it to a list of elements.  Each element will be included in the output list equal to its frequency in the table.
+			A header is optional, but assumed to be absent.
+	\n
+	USAGE:	table2list.pl v0.1.0 -i data.tab -o data.list
+	-i		input 2-column table
+	-o 		output file name
+	-c 		INT flag; input data includes column headers? ( Default: OFF )
+	-s 		STR; preferred data separator. ( Default: tab )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 1 )? 1 : 0;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on the matrix line-by-line
+my %Set;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, just print our single header
+	if ( $cns == 1 && $. == 1 )	{
+		next;
+	}
+	
+	# Split the table into 2 columns.  If there are additional columns, ignore them.
+	my @row = split("$sep", $_);
+	
+	# Count the incoming list elements
+	$Set{$row[0]} = $row[1];
+}
+close $fh if ( $succin );
+foreach ( keys %Set )	{
+	print $fhout "$_\n" x $Set{$_};
+}
+close $fhout if ( $succout );
+
+exit;
+
+#################################### SUBROUTINES ##################################
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

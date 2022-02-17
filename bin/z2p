@@ -1,0 +1,147 @@
+#!/usr/bin/perl
+
+# z2p.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Calculates the p-value given a standardized Z-score.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "z2p.pl v0.1.0\n
+	PURPOSE: Calculates the p-value given a standardized Z-score.
+
+	\n
+	USAGE:	z2p.pl v0.1.0 -i zscores.tab -o pvalues.tab
+	-i		input numeric data matrix
+	-o 		output file name 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate p-value? (less, greater, or two.tailed [Default])
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /(?im)less/ )? "less" : ( $method && $method =~ /(?im)great/ )? "greater" : "two.tailed";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @P;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		print $fhout "$_\n";
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+		push @rownames, $rowname;
+	}
+
+	# Compute the p-values
+	my @pvalues;
+	for ( my $i=0; $i < scalar @row; $i++ )	{
+		if     ( $method eq "less"   )		{	$pvalues[$i] = phi($row[$i]);			}
+		elsif ( $method eq "greater" ) 		{	$pvalues[$i] = 1 - phi($row[$i]);		}
+		else								{	$pvalues[$i] = 2 * phi(-$row[$i]);		}
+	}
+	if ( $rns == 1 )	{ 	print $fhout join("$sep", $rowname, @pvalues), "\n"; 	}
+	else 				{	print $fhout join("$sep",  @pvalues), "\n"; 			}
+}
+close $fh if ( $succin );
+
+exit;
+
+######################### SUBROUTINES ##################################
+
+sub phi		{
+	my ( $zscore ) = @_;
+	
+	my $t = 1.0/(1.0 + 0.2316419*abs($zscore));
+	my $y = $t*(0.319381530
+			+ $t*(-0.356563782
+				+ $t*(1.781477937
+					+ $t*(-1.821255978
+						+ $t*1.330274429 ))));
+	
+	return pdf( $zscore )*$y;
+}
+
+
+
+sub pdf {
+	my ( $u ) = @_;
+	my $SQRT2PI = 2.50662827463;
+	return exp( -0.5 * $u*$u ) / $SQRT2PI;
+}

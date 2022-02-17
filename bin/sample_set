@@ -1,0 +1,131 @@
+#!/usr/bin/perl
+
+# sample_set.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Given an input list of objects (e.g. a multiSet/Bag), simulates a sampling method of drawing colored balls from an urn, replacing the balls in between each trial.
+# For each trial, reports out the first randomly chosen element, plus the frequencies of a resample of given size *n*. 
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use List::Util qw(shuffle);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $sep;
+my $trials;
+my $set_size;
+
+sub usage {
+	my $usage = "sample_set.pl v0.1.0\n
+	PURPOSE:  Given an input list of objects (e.g. a multiSet/Bag), simulates a sampling method of drawing colored balls from an urn, replacing the balls in between each trial.
+			For each trial, reports out the first randomly chosen element, plus the frequencies of a resample of given size *n*. 
+	\n
+	USAGE:	sample_set.pl v0.1.0 -i multiset.list -n trials -o samples.tab
+	-i		input MultiSet with one object per line (duplicate lines allowed)
+	-o 		output file name
+	-s 		STR; output data separator ( Default: tab )
+	-n 		INT; number of resampling trials to compute? ( Default: 1000 )
+	-k 		INT; number of elements per trial to sample? ( Default: 50 )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'sep|s=s' => \$sep,
+			'trials|n=i' => \$trials,
+			'sample_size|k=i' => \$set_size,
+) or die usage();
+
+# Parameter setups
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$trials = ( $trials && $trials >= 1 )? $trials : 1000;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Operate on the input line-by-line
+# Woe to ye who include column or row names in your Sets,
+#   those names will end up in the union as elements.
+my @data;
+my %Urn;
+while ( <$fh> )		{
+	chomp $_;
+	push @data, $_;
+	$Urn{$_} = 1;
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Print a header line
+my @keys = sort keys %Urn;
+print $fhout join("$sep", "Trial", "Random_Element", sort keys %Urn), "\n";
+
+# Sanity check --> is the set size larger than our actual set?
+$set_size = ( $set_size && $set_size >= 1 && $set_size <= scalar @data )? $set_size : 50;
+
+##################################################################################
+# Begin the stochastic trials, which proceed as follows:
+#  -- shuffle the list elements
+#  -- choose an element at random and note its "color"
+my $i=1;
+while ( $i <= $trials )		{
+
+	# Shuffle the list elements at the beginning of each trial
+	@data = shuffle @data;
+	$Urn{ $data[$_] }++ foreach ( 0 .. $set_size - 1 );
+	my $ball = $data[0];
+	
+	# Print a summary of this trial
+	my @current_trial = ( $i, $ball );
+	push @current_trial, $Urn{$_} foreach ( sort keys %Urn );
+	print $fhout join("$sep", @current_trial), "\n";
+	
+	# Increment $i and reset the %Urn
+	$i++;
+	$Urn{$_} = 0 foreach ( @keys );
+}
+close $fhout if ( $succout );
+
+exit;

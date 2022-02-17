@@ -1,0 +1,145 @@
+#!/usr/bin/perl
+
+# tally.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 9-22-2021
+
+# SYNOPSIS:
+# Tallies the number of times each unique element appears in an input data matrix.
+# Returns and prints a 2-column list with the element name and the tally.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $ignore;
+my $method;
+
+sub usage {
+	my $usage = "tally.pl\n
+	PURPOSE: Tallies the number of times each unique element appears in an input data matrix.
+			Returns and prints a 2-column list with the element name and the tally.
+	\n
+	USAGE:	tally.pl -i NxM.tab -o tally.txt
+	-i		input matrix file
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+	-m 		STR; tally elements per row [Default] or cumulative.
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,	
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$ignore = ( $ignore && $ignore ne "NA" )? $ignore : "NA";
+$method = ( $method && $method =~ /(?im)cum/ )? "cumulative" : "row";
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Construct a 2D AoA matrix from the incoming data
+my %Tally = ();
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Set the column names
+	if ( $cns == 1 && $. == 1 )	{
+		next;
+	}
+	
+	# Loop over the rows
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );	
+	for ( my $i=0; $i < scalar @row; $i++ )		{
+		next if ( $ignore && $row[$i] eq "$ignore" );
+		$Tally{$row[$i]}++;		# Tally per column
+	}
+	if ( $method eq "row" )		{
+		print $fhout join($sep, "Element", "Tally"), "\n" if ( $cns == 1 );
+		foreach my $key ( keys %Tally )		{
+			$rowname = ( $rns == 1 )? $rowname : ( $cns == 1 )? $. - 1 : $.;
+			print $fhout join($sep, $rowname, $key, $Tally{$key}), "\n";
+		}
+		%Tally = ();		# Reset %Tally for the next row
+	}
+}
+close $fh if ( $succin );
+
+if ( $method eq "cumulative" )		{
+	print $fhout "Tally\n" if ( $cns == 1 );
+	foreach my $key ( keys %Tally )		{
+		print $fhout join($sep, $key, $Tally{$key}), "\n";
+	}
+}
+close $fhout if ( $succout );
+exit;
+
+
+############################################# SUBROUTINES #############################################
+
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+
+
+

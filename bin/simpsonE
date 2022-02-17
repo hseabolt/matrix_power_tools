@@ -1,0 +1,161 @@
+#!/usr/bin/perl
+
+# SimpsonE.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Calculates Simpson's evenness (E) statistic from each row (or cumulatively) from an input data matrix.
+# Requires that the data be numeric and representative of frequencies/counts.
+
+# E = (1/S) * (1/D)
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns;
+my $rns;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "SimpsonE.pl v0.1.0\n
+	PURPOSE: Calculates Simpson's evenness (E) statistic from each row (or cumulatively) from an input data matrix.
+			Requires that the data be numeric and representative of frequencies/counts.
+	\n
+	USAGE:	SimpsonE.pl v0.1.0 -i matrix.tab -o evenness.tab
+	-i		input matrix file in TAB format.
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate Simpson's D (either row [Default] or cumulative).
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /cum/ )? "cumulative" : "row";
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on the matrix line-by-line
+my @cumulative;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, just print our singple header
+	if ( $cns == 1 && $. == 1 )	{
+		print $fhout "SimpsonD\n";
+		next;
+	}
+	
+	# Now operate on the rows
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	
+	if ( $method ne "cumulative" )	{
+		if ( $rns == 1 )	{	print $fhout "$rowname", "$sep", sprintf("%3.4f", alpha_diversity_Simpson( @row )), "\n";	}
+		else 				{	print $fhout sprintf("%3.4f", alpha_diversity_Simpson( @row )), "\n";	}
+	}
+	else 	{
+		for ( my $i=0; $i < scalar @row; $i++ )	{
+			$cumulative[$i] += $row[$i];
+		}
+	}
+}
+close $fh if ( $succin );
+
+# Print the cumulative Entropy if this was requested
+if ( $method eq "cumulative" )	{
+	if ( $rns == 1 )	{	print $fhout "Cumulative", "$sep", sprintf("%3.4f", alpha_diversity_Simpson( @cumulative )), "\n";	}
+	else 				{	print $fhout sprintf("%3.4f", alpha_diversity_Simpson( @cumulative )), "\n";	}
+}
+close $fhout if ( $succout );
+exit;
+
+
+#################################### SUBROUTINES ##################################
+
+# Calculates Simpson's D, 1-D (Index of Diversity), 1/D (Gini-Simpson or Reciprocal Simpson), and Equitability E.
+sub alpha_diversity_Simpson		{
+	my ( @sample ) = @_;
+	
+	# Error handling: return 0 values if $N is zero
+	my $N = sum( @sample );
+	return ( 0 ) if ( $N == 0 );										
+
+	# Calculate *n* for each species *i*, times *n_{i}* - 1.
+	my @nis;
+	my $S = 0;
+	for ( my $i=0; $i < scalar @sample; $i++ )	{
+		$nis[$i] = $sample[$i] * ($sample[$i] - 1);
+		$S++ if ( $sample[$i] > 0 );
+	}
+
+	# Calculate *D* = sum(nis) / N(N-1)
+	my $D = ( sum(@nis) / ($N*($N-1)) );
+	
+	my $E = ( $S == 0 || $D == 0 )? "Inf" : (1/$S) * (1/$D);
+	return $E;
+}
+
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

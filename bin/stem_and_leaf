@@ -1,0 +1,136 @@
+#!/usr/bin/perl
+
+# stem_and_leaf.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Computes and prints a stem and leaf plot from an incoming numeric data matrix
+
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+
+sub usage {
+	my $usage = "stem_and_leaf.pl v0.1.0\n
+	PURPOSE: Computes and prints a stem and leaf plot from an incoming numeric data matrix.
+	
+	\n
+	USAGE:	stem_and_leaf.pl v0.1.0 -i matrix.tab -o stem_and_leaf.plot
+	-i		input numeric data (can be piped in from STDIN)
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my %Stems;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+	}
+
+	# Process each element into a stem and leaf
+	foreach my $element ( @row )	{
+		my @data = split('', $element);
+		my $leaf = pop @data;
+		my $stem = ( scalar @data == 0 )? "0" : join('', @data);
+		push @{$Stems{$stem}}, $leaf;
+	}
+
+}
+close $fh if ( $succin );
+
+# Get some information to help nicely format the output plot
+my $longest = get_longest_hash_key(\%Stems);
+
+# Sort the list associated with each stem in ascending order
+foreach my $stem ( sort { $a <=> $b } keys %Stems )	{
+	my @sorted_leafs = sort { $a <=> $b } @{$Stems{$stem}};
+	print $fhout " " x ($longest - length($stem)), $stem, " | ", join(",", @sorted_leafs), "\n";
+}
+close $fhout if ( $succout );
+exit;
+
+############################### SUBROUTINES #######################################
+
+# Get the longest KEY in a hash
+# Accepts a hash reference as input, returns a scalar KEY (not its length!)
+sub get_longest_hash_key	{
+	my ( $hash ) = @_;
+	my %Hash = %{$hash};
+	my $longest = (sort keys %Hash)[0];
+	foreach my $value ( keys %Hash )	{
+		$longest = length($longest) > length($value)? $longest : $value;
+	}
+	return length $longest;
+}
