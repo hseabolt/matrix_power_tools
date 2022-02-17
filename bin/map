@@ -1,0 +1,188 @@
+#!/usr/bin/perl
+
+# map.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Computes the one-to-one mapping of the data contained in two lists.
+# Output is a three column table.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input1 = "--";
+my $input2 = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $index_a = 0;
+my $index_b = 0;
+
+sub usage {
+	my $usage = "map.pl v0.1.0\n
+	PURPOSE: Computes the one-to-one mapping of the data contained in two lists, each containing a key used to map the data to the opposing list.
+			Output is a three column table with KEY  VALUEA   VALUEB (or more if there are more than 2 values).
+			The first element in each column is used as the mapping key unless otherwise specified.
+
+	\n
+	USAGE:	map.pl v0.1.0 -A data1.tab -B data2.tab -o map.tab
+	-1		list of data to map against B, containing columns: a KEY on which to map/join and at least one VALUE.
+	-2 		second input data B, formatted the same as list A
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: OFF )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	
+	=== DATA KEY INDEXING === 
+	-a 		STR; INDEX of the column to use as the mapping key for input data A.  Use 0-based indexing.  [ Default: 0 (first element) ]
+	-b 		STR; INDEX of the column to use as the mapping key for input data B.  Use 0-based indexing.  [ Default: 0 (first element) ]
+\n";
+	print $usage;
+}
+
+GetOptions(	'1|A=s' => \$input1, 
+			'2|B=s' => \$input2,
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'indexa|a=i' => \$index_a,
+			'index_b|b=i' => \$index_b,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$index_a = ( $index_a > 0 )? $index_a : 0;		
+$index_b = ( $index_b > 0 )? $index_b : 0;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX1, "<", "$input1") if ( $input1 ne "--" && -e $input1 );
+$fh = *MATRIX1 if ( $succin ); 
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my %MapA;
+my @A;
+my @keysA;
+my @colnamesA;
+my $longestA = 0;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnamesA = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $key = shift @row;
+	push @keysA, $key;
+	
+	# Initialize the data
+	push @{$MapA{$key}}, $_ foreach (@row);
+	$longestA = ( scalar @row > $longestA )? scalar @row : $longestA;
+}
+close $fh if ( $succin );
+
+# Populate missing values in the hash
+foreach my $key ( keys %MapA )	{
+	for ( my $i=0; $i < $longestA; $i++ )	{
+		$MapA{$key}->[$i] = "<NA>" if ( not defined $MapA{$key}->[$i] );
+	}
+}
+
+##################################################################################
+# Read the second matrix, which must come from a file and have the same formatting as the first matrix
+open(MATRIX2, "<", "$input2" ) or die "add::FATAL ERROR with 2nd input file $input2 --> $!\n";
+	my @data2 = <MATRIX2>;
+close MATRIX2;
+
+# Operate on the matrix line-by-line
+my %MapB;
+my @B;
+my @keysB;
+my @colnamesB;
+my $longestB = 0;
+for ( my $i=0; $i < scalar @data2; $i++ )	{
+	chomp $data2[$i];
+	if ( $cns == 1 && $i == 0 )		{
+		@colnamesB = split("$sep",  $data2[$i]);
+		next;
+	}
+	my @row = split("$sep", $data2[$i]);
+	my $key = shift @row;
+	push @keysB, $key;
+	
+	# Initialize the data
+	push @{$MapB{$key}}, $_ foreach (@row);
+	$longestB = ( scalar @row > $longestB )? scalar @row : $longestB;
+}
+
+# Populate missing values in the hash
+foreach my $key ( keys %MapB )	{
+	for ( my $i=0; $i < $longestB; $i++ )	{
+		$MapB{$key}->[$i] = "<NA>" if ( not defined $MapB{$key}->[$i] );
+	}
+}
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Initialize any missing keys in the reciprocal hash as NA values 
+my %Union = (%MapA, %MapB );
+foreach my $key ( keys %MapB )	{
+	next if ( exists $MapA{$key} );
+	for ( my $i=0; $i < $longestA; $i++ )	{
+		$MapA{$key}->[$i] = "<NA>";
+	}
+}	
+foreach my $key ( keys %MapA )	{
+	next if ( exists $MapB{$key} );
+	for ( my $i=0; $i < $longestB; $i++ )	{
+		$MapB{$key}->[$i] = "<NA>";
+	}
+}
+
+# Merge the two hashmaps with concantenation --> all keys should now be present in both hashmaps
+print $fhout join("$sep", @colnamesA, @colnamesB), "\n" if ( $cns == 1 );
+foreach my $key ( keys %Union )	{
+	print $fhout join("$sep", $key, @{$MapA{$key}}, @{$MapB{$key}}), "\n";
+}
+close $fhout if ( $succout );
+exit;

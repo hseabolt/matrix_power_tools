@@ -1,0 +1,176 @@
+#!/usr/bin/perl
+
+# prob2freq.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Converts a frequency distribution to a probability distribution.  By default, considers each row as a unique distribution,
+# but can be toggled to considered the cumulative total.
+# Requires that the data be numeric and representative of frequencies/counts.
+
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns;
+my $rns;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "prob2freq.pl v0.1.0\n
+	PURPOSE: Converts a probability distribution to a frequency (count) distribution of integers.  By default, considers each row as a unique distribution, but can be toggled to considered the cumulative total.
+			Treats the smallest probability value per row as a frequency count of 1 and scales the other probabilities accordingly.
+			Requires that the input data be numeric and representative of probabilities.
+	\n
+	USAGE:	prob2freq.pl v0.1.0 -i probability.tab -o frequency.tab
+	-i		input matrix file in TAB format.
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate probabilities (either row [Default] or cumulative).
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /cum/ )? "cumulative" : "row";
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on the matrix line-by-line
+my $total = 0;
+my @M;
+my @rownames;
+my $global_min = "inf";
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, just print our singple header
+	if ( $cns == 1 && $. == 1 )	{
+		print $fhout "$_\n";
+		next;
+	}
+	
+	# Now operate on the rows
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}	
+	
+	# Get the index of the smallest non-zero element in the row,
+	# Then scale all other elements per row by the argmin value
+	my $argmin = argmin(@row);
+	my $argmin_value = $row[$argmin];
+	
+	if ( $method ne "cumulative" )	{
+		foreach (@row)	{	$_ = sprintf("%.0f", $_ /= $argmin_value);		}
+		if ( $rns == 1 )	{	print $fhout "$rownames[$.-2]", "$sep", join("$sep", @row), "\n";	}
+		else 				{	print $fhout join("$sep", @row), "\n";	}
+	}
+	else 	{
+		$global_min = ( $global_min > $argmin_value )? $argmin_value : $global_min;
+		push @M, \@row;
+	}
+}
+close $fh if ( $succin );
+
+# Print the cumulative Entropy if this was requested
+if ( $method eq "cumulative" )	{
+	for ( my $i=0; $i < scalar @M; $i++ )	{
+		for ( my $j=0; $j < scalar @{$M[0]}; $j++ )		{
+			$M[$i]->[$j] = sprintf("%.0f", $M[$i]->[$j] / $global_min);
+		}
+		if ( $rns == 1 )	{	print $fhout "$rownames[$i]", "$sep", join("$sep", @{$M[$i]}), "\n";	}
+		else 				{	print $fhout join("$sep", @{$M[$i]}), "\n";	}
+	}
+}
+close $fhout if ( $succout );
+exit;
+
+
+#################################### SUBROUTINES ##################################
+
+# Calculates the argmin from a list.
+# Returns the first occurence if there are ties.  Ignores elements that equal zero.
+sub argmin	{
+	my ( @list ) = @_;
+	my $min = 0;
+	for ( my $i=0; $i < scalar @list; $i++ )	{
+		next if $list[$i] == 0;
+		$min = $list[$i];
+		last;
+	}
+	for ( my $i=0; $i < scalar @list; $i++ )	{
+		next if ($list[$i] == 0);
+		$min = $list[$i] if ( $list[$i] < $min );
+	}
+	my @argmin;
+	for ( my $i=0; $i < scalar @list; $i++ )	{
+		push @argmin, $i if ( $list[$i] == $min );
+	}
+	return $argmin[0];		# This gives us the first index if there are ties
+}
+
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

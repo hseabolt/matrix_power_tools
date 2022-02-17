@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+
+# probaiblity_profile.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS:
+# This program accepts an input data matrix and computes a probabilistic profile of the matrix rows.
+# This profile is a precursor model to a more fully-developed HMM.  Has the option to profile using pseudocounts.
+# Assumes that all data are numeric and positive, e.g. counts or frequency information.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+#no warnings 'uninitialized';
+use Getopt::Long qw(GetOptions);
+
+# Variable declarations
+my $input = "--";
+my $output = "--";
+my $pseudocounts;
+my $cns = 1;
+my $rns = 1;
+my $sep;
+
+sub usage {
+	my $usage = "probaiblity_profile.pl\n
+	PURPOSE: Accepts an input numerical data matrix and computes a probabilistic profile of the matrix rows.
+			This profile is a precursor model to a more fully-developed HMM.  Has the option to profile using pseudocounts.
+			Assumes that all data are numeric and positive, e.g. counts or frequency information.
+			\n
+	USAGE:	probaiblity_profile.pl -i <data.matrix> -o <profile.hmm>
+	-i		input file
+	-c 		INT flag; use pseudocounts? [ Default: OFF ]
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+	-o		output file name\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'pseudocounts|p=i' => \$pseudocounts,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$pseudocounts = ( $pseudocounts && $pseudocounts != 0 )? 1 : 0;
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+# Read the input matrix and populate a frequency hash
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set the output file handle
+my $succout = open( OUT, ">", "$output" ) if ( $output ne "--" );
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{ 	$fhout = *STDOUT;		}
+
+# Loop over the matrix rows and calculate the data
+my $position = 1;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, skip this line
+	if ( $cns == 1 && $. == 1 )		{
+		print $fhout "$_\n";
+		next;
+	}
+	
+	# Now operate element-wise over the rows and print
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	my $sum = sum( @row );
+	foreach (@row)	{
+		$_ += 1 if ( $pseudocounts == 1 );				# Artificially add +1 if we want to use pseudocounts --> this prevents probabilities of zero
+		$_ = sprintf("%3.4f", abs($_ / $sum));			# Using abs() here since we cannot have negative probabilities
+	}
+	if ( $rns == 1 )	{	print $fhout "$position$sep", join("$sep", @row), "\n";		}
+	else				{	print $fhout join("$sep", @row), "\n";						}
+	$position++;
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;
+
+
+########################## SUBROUTINES ###############################
+
+sub sum	{
+	my ( @numbers ) = @_;
+	my $sum = 0;
+	
+	foreach ( @numbers )	{
+		$sum += $_;
+	}
+	
+	return $sum;
+}
+

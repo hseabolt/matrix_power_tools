@@ -1,0 +1,228 @@
+#!/usr/bin/perl
+
+# moran_process.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Initialize and simulate a stochastic Moran process model with N different colored balls and their associated starting frequency counts.
+# Input is expected to be in "table" format with 2 columns per line, the element name and the frequency count.
+# Given an positive INT number of trials to run, outputs a table with the results per trial.
+# This model is very similar to the stochastic Polya's Urn model, but includes the additional step of removing a randomly
+# chosen ball per time step, thus maintaining a constant population size.
+#
+# This model is very similar to the stochastic Polya's Urn model, but includes the additional step of removing a randomly
+# chosen ball per time step, thus maintaining a constant population size.  
+#			
+# If desired, mutations are allowed with a fixed probability per ball color, given as a 3rd column in the input table between the range 0 to 1.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use List::Util qw(shuffle);
+
+use Data::Dumper;
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $trials;
+
+sub usage {
+	my $usage = "moran_process.pl v0.1.0\n
+	PURPOSE:  Initialize and simulate a stochastic Moran process model with N different colored balls and their associated starting frequency counts.
+			Input is expected to be in \"table\" format with 2 columns per line, the element name and the frequency count.
+			Given an positive INT number of trials to run, outputs a table with the results per trial.
+			
+			This model is very similar to the stochastic Polya's Urn model, but includes the additional step of removing a randomly
+			chosen ball per time step, thus maintaining a constant population size.  
+			
+			If desired, mutations are allowed with a fixed probability per ball color, given as a 3rd column in the input table between the range 0 to 1.
+
+	\n
+	USAGE:	moran_process.pl v0.1.0 -i data.tab -n trials -o moran.tab
+	-i		input table with 2 columns
+	-o 		output file name
+	-c 		INT flag; input matrix contains column headers? ( Default: ON )
+	-r 		INT flag; input matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+	-n 		INT; number of resampling trials to compute? ( Default: 1000 );
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'trials|n=i' => \$trials,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$trials = ( $trials && $trials >= 1 )? $trials : 1000;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @data;
+my %Urn;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Process column headers if they are marked as present
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	
+	# Process rows --> expecting the first non-rowname element to be 
+	# the category "ball color" and the 2nd element to be the corresponding frequency.
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}
+	
+	# Set the starting count (element 1), the mutation probability if one is given (element 2), and a counter for the number of variants arising from this progenitor (element 3)
+	$Urn{$row[0]} = [ $row[1], 0.0, 1 ];
+		$Urn{$row[0]}->[1] = $row[2] if ( $row[2] );	
+
+	# Generate the list of starting balls
+	push @data, $row[0] foreach ( 1..$row[1] );
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Initialize a table to hold the data from each trial
+my @Trials;
+my %Times;
+my @trial0 = ( 0, "<NA>", "<NA>" );
+my %snapshot = map { $_ => $Urn{$_}->[0] } keys %Urn;
+push @trial0, \%snapshot;
+push @trial0, sum( values %snapshot );
+push @Trials, \@trial0;
+
+##################################################################################
+# Begin the stochastic trials, which proceed as follows:
+#  -- shuffle the list elements
+#  -- choose an element at random and note its "color"
+#  -- add a additional ball of the same color to the list
+my $i=1;
+while ( $i <= $trials )		{
+
+	# Shuffle the list elements at the beginning of each trial
+	@data = shuffle @data;
+	
+	# Randomly select an element from the list.
+	# Then, randomly draw a second element and mark it for DEATH.
+	my $ball = $data[ int(rand(scalar @data)) ];
+	my $index = int(rand(scalar @data));
+	
+	# Did the chosen element mutate this trial?
+	my $mut_prob = rand();
+	if ( $mut_prob < $Urn{$ball}->[1] )		{
+		my $mutated = "$ball$Urn{$ball}->[2]";			# Set the mutation's name
+		$Urn{$ball}->[2]++;								# Increment the mutation counter for this ball
+		$Urn{$mutated} = [ 1, $Urn{$ball}->[1] ];		# Inherit the parent's mutation probability 
+		$ball = $mutated;
+		
+	}
+	else	{
+		$Urn{$ball}->[0]++;
+	}
+	
+	# Note the color of the deathmarked element, then
+	# replace that element with the newly "born" one.
+	my $deathmark = $data[$index];
+	splice(@data, $index, 1);
+	push @data, $ball;
+	$Urn{$deathmark}->[0]--;
+	
+	# Map the Urn's frequencies to a time-step snapshot
+	my @current_trial = ( $i, $ball, $deathmark );
+	my %snapshot = map { $_ => $Urn{$_}->[0] } keys %Urn;
+	push @current_trial, \%snapshot;
+	push @current_trial, sum( values %snapshot );
+	push @Trials, \@current_trial;
+	
+	# Increment $i
+	$i++;
+}
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Print a header line 
+print $fhout join("$sep", "Time", "Selected_Element", "Removed_Element", sort keys %Urn, "Total_Elements"), "\n";
+
+#print Dumper @Trials;
+my @ball_types = sort keys %Urn;
+for ( my $i=0; $i < scalar @Trials; $i++ )	{
+	my ( $time_step, $ball, $deathmark, $snapshot, $sum ) = ( $Trials[$i]->[0],  $Trials[$i]->[1],  $Trials[$i]->[2],  $Trials[$i]->[3],  $Trials[$i]->[4] );
+	my %snapshot = %{$snapshot};
+	
+	my @counts;
+	for ( my $j=0; $j < scalar @ball_types; $j++ )	{
+		$counts[$j] = ( exists $snapshot{$ball_types[$j]} )? $snapshot{$ball_types[$j]} : 0;
+	}
+	print join("$sep", $time_step, $ball, $deathmark, @counts ,$sum), "\n";
+}
+close $fhout if ( $succout );
+
+exit;
+
+################################## SUBROUTINES ###########################################
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

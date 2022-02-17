@@ -1,0 +1,130 @@
+#!/usr/bin/perl
+
+# matrix2bag.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Reads a matrix and converts the entries to a MultiSet (a "bag") where elements of the Set can have duplicates.
+# Computes the size using rownames, and thus assumes they are present.  If they are not, ascending integers starting at 1 will be used as stand-ins.
+# Tranpose the matrix first if a Set of the colnames is desired.
+# Output is in "list" format, one element per line for all elements in the resulting Bag.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+
+sub usage {
+	my $usage = "matrix2set.pl v0.1.0\n
+	PURPOSE: Reads a matrix and converts the entries to a MultiSet (a \"bag\") where elements of the Set can have duplicates.
+			Computes the size using rownames, and thus assumes they are present.  If they are not, ascending integers starting at 1 will be used as stand-ins.
+			Tranpose the matrix first if a Set of the colnames is desired.
+			Output is in \"list\" format, one element per line for all elements in the resulting Set.
+	\n
+	USAGE:	matrix2set.pl v0.1.0 -i matrix.tab -o set.list
+	-i		input matrix file in TAB format.
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=s' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on the matrix line-by-line
+my %Set;
+my $k = 1;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, just print our single header
+	if ( $cns == 1 && $. == 1 )	{
+		next;
+	}
+	
+	# Fetch and set rownames
+	my @row = split("$sep", $_);
+	my $rowname = $k;
+	if ( $rns == 1 )	{		$rowname = shift @row;		}
+	else 				{		$k++;						}
+	
+	# Build the Set and print as we go
+	my $sum = sum(@row);
+	if ( exists $Set{$rowname} )	{ 	next;	}
+	else	{
+		print $fhout "$rowname\n" x $sum;
+		$Set{$rowname} = 1;
+	}
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;
+
+#################################### SUBROUTINES ##################################
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

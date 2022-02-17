@@ -1,0 +1,284 @@
+#!/usr/bin/perl
+
+# rank.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Ranks the data in a distribution given by an input numeric data matrix, either by row (default) or cumulatively.
+# Rankings are in descending order, e.g. the largest value is rank 1.
+# Ties are ranked in continuous order, e.g. two equal values would have ranks 1 and 2 rather than both being rank 1.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "rank.pl v0.1.0\n
+	PURPOSE: Ranks the data in a distribution given by an input numeric data matrix, either by row (default) or cumulatively.
+			Rankings are in descending order, e.g. the largest value is rank 1.
+			Ties are ranked in continuous order, e.g. two equal values would have ranks 1 and 2 rather than both being rank 1.
+
+	\n
+	USAGE:	rank.pl v0.1.0 -i data.tab -o rank.tab
+	-i		input numeric data matrix
+	-o 		output file name 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate rankings (one of row, col, rowsum [Default], colsum, or cumulative).
+	
+	== METHODS ==
+	row			rank each element in per row
+	col 		rank each element in per column
+	rowsum		sum the elements per row, then rank the row sums			** Default
+	colsum		sum the elements per column, then rank the column sums
+	cumulative	rank all elements in the input matrix
+	
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+# Set the method we want to use
+my %methods = ("row" => 1, "col" => 1, "rowsum" => 1, "colsum" => 1, "cumulative" => 1);
+$method = ( $method && exists $methods{$method} )? $method : "rowsum";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @P;
+my $nrows = 0;
+my $ncols = 0;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		print $fhout join("$sep", @colnames), "\n" if ( $cns == 1 && $method eq "row" );
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+		push @rownames, $rowname;
+	}
+
+	# Compute the requested rankings
+	if ( $method eq "row" )		{
+		my ( $order, $indices ) = rank(@row);	
+		my @ranks;
+		for ( my $j=0; $j < scalar @{$order}; $j++ )	{
+			$ranks[ $indices->[$j] ] = $j+1;
+		}
+		
+		if ( $rns == 1 )	{ 	print $fhout join("$sep", $rowname, @ranks), "\n";		}		
+		else 				{	print $fhout join("$sep",@ranks), "\n";		}
+	}
+	elsif ( $method eq "col" )	{
+		push @P, \@row;
+	}
+	elsif ( $method eq "colsum" ) 	{
+		for ( my $i=0; $i < scalar @row; $i++ )	{
+			$P[$i] += $row[$i];
+		}
+	}
+	elsif ( $method eq "cumulative" )	{
+		push @P, $_ foreach (@row);
+	}
+	else 	{
+		# Sum the row and add it to the list of data that we will rank
+		push @P, sum(@row);
+	}
+	$nrows++;
+	$ncols = scalar @row;
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Method "row" above is the only one that can be computed directly in place,
+# so if we are not using that method, then we have some more work to do
+
+# Col method
+if ( $method eq "col" )	{
+	# Transpose @P, then rank the "rows" as usual
+	my @Pt = @{ transpose(@P) };
+	
+	my @M;
+	foreach my $row ( @Pt )	{
+		my ( $order, $indices ) = rank(@{$row});	
+		my @ranks;
+		for ( my $j=0; $j < scalar @{$order}; $j++ )	{
+			$ranks[ $indices->[$j] ] = $j+1;
+		}
+		push @M, \@ranks;
+	}
+	
+	# Transpose it all back
+	my @Mt = @{ transpose(@M) };
+	
+	# Print
+	print $fhout join("$sep", @colnames), "\n" if ( $cns == 1 );
+	for ( my $i=0; $i < scalar @Mt; $i++ )	{
+		if ( $rns == 1 )	{ 	print $fhout join("$sep", $rownames[$i], @{$Mt[$i]}), "\n";		}		
+		else 				{	print $fhout join("$sep", @{$Mt[$i]}), "\n";					}
+	}
+	
+}
+# Colsum method
+elsif ( $method eq "colsum" ) 	{
+	# Rank the column sums
+	my ( $order, $indices ) = rank(@P);	
+	my @ranks;
+	for ( my $j=0; $j < scalar @{$order}; $j++ )	{
+		$ranks[ $indices->[$j] ] = $j+1;
+	}
+	
+	# Print
+	print $fhout join("$sep", @colnames), "\n" if ( $cns == 1 );
+	if ( $rns == 1 )	{ 	print $fhout join("$sep", "Rank", @ranks), "\n";		}		
+	else 				{	print $fhout join("$sep", @ranks), "\n";				}
+}
+# Cumulative method --> rank all elements in the matrix regardless of position
+elsif ( $method eq "cumulative" )	{
+	# Rank all the elements
+	my ( $order, $indices ) = rank(@P);	
+	my @ranks;
+	for ( my $j=0; $j < scalar @{$order}; $j++ )	{
+		$ranks[ $indices->[$j] ] = $j+1;
+	}
+
+	# Wrap the @ranks list back into the original matrix dimensions
+	my @M;
+	for ( my $i=0; $i < $nrows; $i++ )	{
+		for ( my $j=0; $j < $ncols; $j++ )	{
+			$M[$i]->[$j] = shift @ranks;
+		}
+	}
+	
+	# Print the header if we are using it
+	print $fhout join("$sep", @colnames), "\n" if ( $cns == 1 );
+	for ( my $i=0; $i < scalar @M; $i++ )	{
+		if ( $rns == 1 )	{ 	print $fhout join("$sep", $rownames[$i], @{$M[$i]}), "\n";		}
+		else				{ 	print $fhout join("$sep", @{$M[$i]}), "\n";						}
+	}
+}
+# Rowsums
+elsif ( $method eq "rowsum" )	{
+	if ( $cns == 1 )	{	print $fhout "Rank\n";		}
+	my ( $order, $indices ) = rank(@P);	
+	my @ranks;
+	for ( my $j=0; $j < scalar @{$order}; $j++ )	{
+		$ranks[ $indices->[$j] ] = $j+1;
+	}																			
+	for ( my $i=0; $i < scalar @ranks; $i++ )	{
+		if ( $rns == 1 )	{ 	print $fhout join("$sep", $rownames[$i], $ranks[$i]), "\n";		}		
+		else 				{	print $fhout $ranks[$i], "\n";									}
+	}
+}
+close $fhout if ( $succout );
+
+exit;
+
+############################# SUBROUTINES ###########################################
+
+# Computes a sum
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+# Compute the ranking in-place of a list of numerical data.
+# It is rather ugly code, but it works
+sub rank	{
+	my ( @sample ) = @_;
+	
+	# Zero values screw up the code below, so we will reset these to inf
+	# foreach (@sample)	{	$_ = "inf" if ( $_ == 0 );		}
+	# print "$_\n" foreach (@sample);
+	# print "\n\n\n";
+	
+	# Sort the lists
+	my $j=0;
+	my @tmp_abunds = map { {value => $_, index => $j++} } @sample;
+	my @sorted_temp_abunds = sort { $b->{value} <=> $a->{value} } @tmp_abunds;
+	my @sorted_abunds = map { $_->{value} } @sorted_temp_abunds;
+	my @sorted_indices = map { $_->{index} } @sorted_temp_abunds;
+	return ( \@sorted_abunds, \@sorted_indices );
+}
+
+# Tranpose a matrix
+sub transpose		{
+	my ( @matrix ) = @_;
+	my $matrix_t = [ ];
+	for ( my $i=0; $i < scalar @matrix; $i++ )	{
+		for ( my $j=0; $j < scalar @{$matrix[0]}; $j++ )	{
+		$matrix_t->[$j]->[$i] = $matrix[$i]->[$j];
+		}
+	}	
+	return $matrix_t;
+}

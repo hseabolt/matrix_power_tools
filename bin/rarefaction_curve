@@ -1,0 +1,189 @@
+#!/usr/bin/perl
+
+# rarefaction_curve.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-11-2021
+
+# SYNOPSIS:
+# Accepts an OTU abundance matrix containing count data, computes a rarefaction (aka species discovery or collector's) curve 
+# for a specified number of permutations, and returns the average value and variance for each iteration.
+
+# The choose() subroutine is transfered as-is from the book "Mastering Algorithms with Perl"
+# Citation: Orwant, J., Hietaniemi, J., Macdonald, J., & MacDonald, J. D. (1999). Mastering algorithms with Perl. "O'Reilly Media, Inc.".
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use List::Util qw(shuffle);
+
+# Required input parameters
+my $input = "--";
+my $output = "--";
+my $sep;
+my $nperm;
+
+sub usage {
+	my $usage = "rarefaction_curve v0.1.0\n
+	PURPOSE: Accepts a tab-delimited OTU abundance table (column headers and row names are required), with samples as rows and taxa as columns.
+	Outputs a tabular text file with the X-Y coordinates of the rarefaction curve.
+		
+			
+	USAGE:	rarefaction_curve v0.1.0 -i matrix.tab -o rarefaction_curve.tab
+	-i	input tab-delimited OTU abundance table, expecting rows to be samples
+	-o 	output file name
+	-s	separator used in the input matrix? [ Default: tab ]
+	-n 	INT; number of permutations to compute the rarefaction curve? [ Default: 1000 ];
+	\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input,
+			'out|o=s' => \$output,
+			'sep|s=s' => \$sep,
+			'nperm|n=i' => \$nperm,
+) or die usage();
+
+# Parameter setups
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$nperm = ( $nperm && $nperm >= 1 )? $nperm : 1000;
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Construct a 2D AoA matrix from the incoming data
+my @headers;
+my @rownames;
+my @M = ();
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Operate on column headers
+	if ( $. == 1 )		{
+		@headers = split("$sep", $_);
+		next;
+	}
+	
+	# Operate on rows, include row names
+	my @row = split("$sep", $_);
+	my $rowname = shift @row;
+	push @rownames, $rowname;
+	
+	# Add the new row onto the matrix
+	push @M, \@row;
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Set the output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+print $fhout join("$sep", "SampleSize", "Mean_OTUs", "StDev", "Low", "High"), "\n";
+
+# The main loop of permutations
+for ( my $i=0; $i <= scalar @M; $i++ )	{
+	my @rarefaction_row;
+	for ( my $j=0; $j < $nperm; $j++ )	{
+		
+		# Just a nice checkpoint to print to the screen
+		#print STDERR "Nsamples: $i / ", scalar @M, " -- Nperms: $j / $nperm\r" if ( $j % 100 == 0 );
+		
+		# Resample the data for this permutation
+		my @Sample = @{ sample_rows( \@M, $i ) };
+		
+		# Calculate the number of unique species in the subsampled matrix
+		# This refers to the number of columns with non-zero values in the @Sample matrix
+		my %Count = ();
+		for ( my $m=0; $m < scalar @Sample; $m++ )	{
+			for ( my $n=0; $n < scalar @{$Sample[0]}; $n++ )	{
+				$Count{ "V$n" } += $Sample[$m]->[$n] if ( $Sample[$m]->[$n] > 0 );		# We dont actually care what the original header for each was anymore, we just want to maintain an ordering along the row
+			}
+		}
+		
+		# Add the count to the row vector 
+		push @rarefaction_row, scalar keys %Count;
+	}
+	
+	# Calculate the stats from each row vector
+	my ( $mean, $stdev ) = ( mean(@rarefaction_row), sqrt(variance(@rarefaction_row)) );
+	print $fhout join("\t", $i, sprintf("%3.4f", $mean), sprintf("%3.4f", $stdev), sprintf("%3.4f", $mean - $stdev), sprintf("%3.4f", $mean + $stdev) ), "\n";
+}
+close $fhout if ( $succout );
+
+exit;	
+
+
+
+#################### SUBROUTINES ###########################
+
+# Randomly sample *m* rows from a matrix M (without replacement)
+# Returns a list of row references
+sub sample_rows		{
+	my ( $M, $m ) = @_;
+	my @M = @{$M};
+
+	# Resample the list of rows
+	my @S;
+	my $i=0;
+	while ( $i < $m )	{
+		@M = shuffle( @M );
+		push @S, $M[$_] foreach ( 0 .. $i-1 );
+		$i++;
+	}
+	return \@S;
+}
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+# Calculates the mean of a list
+sub mean 	{
+	return sum(@_)/@_;
+}
+
+# Calculate the variance from a list
+sub variance	{
+	my @data = @_;
+	return 0 if ( @data == 1 ); 
+	my $mean = mean(@data);
+	my $var = 0;
+	$var += ( $_ - $mean ) ** 2 foreach ( @data );
+	$var = ( $var / scalar @data );
+	return $var;
+}

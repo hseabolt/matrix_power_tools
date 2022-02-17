@@ -1,0 +1,164 @@
+#!/usr/bin/perl
+
+# random_walk.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Computes a random walk of *n* steps, given a graph adjacency matrix.
+# Prints each node in the order that it was visited.  Input graphs can be directed, but edge weights are ignored when choosing the next step.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $source;
+my $n;
+
+sub usage {
+	my $usage = "random_walk.pl v0.1.0\n
+	PURPOSE: Computes a random walk of *n* steps, given a graph adjacency matrix.
+			Prints each node in the order that it was visited.  Input graphs can be directed, but edge weights are ignored when choosing the next step.
+			Returns the walked path in one line separated by the input data separator.
+	\n
+	USAGE:	random_walk -i adjMatrix.tab -o journey.tab
+	-i		input graph adjacency matrix
+	-o 		output file name 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-b 		STR; node to begin the random walk at (the source node)? ( Default: random node )
+	-n 		INT; (positive) number of steps to take in the random walk ( Default: 10 ),
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'source|b=s' => \$source,
+			'steps|n=i' => \$n,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$n = ( $n && $n >= 0 )? $n : 10;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Read in the graph adjacency matrix
+my %G;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Column name handling
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		$G{$_} = [] foreach ( @colnames );
+		next;
+	}
+	
+	# Row operations
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+	}
+	else 	{
+		my $tick = ( $cns == 1 )? $. - 1 : $.;
+		$rowname = "V" . "$tick";
+	}
+	
+	if ( scalar @colnames == 0 )	{
+		for ( my $j=0; $j < scalar @row; $j++ )	{
+			my $tick = $. + $j;
+			$colnames[$j] = "V" . "$tick";
+		}
+	}
+	
+	for ( my $i=0; $i < scalar @row; $i++ )		{
+		push @{$G{$rowname}}, $colnames[$i] if ( $row[$i] != 0 );		 # Assumes any value other than 0 is an edge weight.
+	}
+}
+close $fh if ( $succin );
+
+# Compute the random walk and print the line out
+$source = ( $source )? $source : (keys %G)[0];
+print $fhout join("$sep", @{ walk($source) }), "\n";
+
+exit;
+
+################################# SUBROUTINES #################################################
+
+# Subroutine for a random walk of a graph structure starting at a give source node
+sub walk		{
+	my ( $src ) = @_;
+	
+	my @walk = ( $src );
+	while( scalar @walk < $n )	{
+		
+		# Current location is the last vertex in @walk
+		my $vertex = $walk[-1];			
+		
+		# Get the neighbors of $vertex --> remember: neighbors is a Set!
+		my @neighbors = @{ $G{$vertex} };
+		my $next_step = $neighbors[ int(rand(scalar @neighbors)) ];
+		
+		# Add the new vertex to @walk
+		push @walk, $next_step;
+	
+	}
+	return \@walk;
+}

@@ -1,0 +1,184 @@
+#!/usr/bin/perl
+
+# rank_abundance.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Calculates a rank abundance curve using the marginal distributions of the input data matrix (as incidence data).
+# Requires an input OTU abundance table with samples as rows and OTUs as columns.
+# Can also be toggled to compute rank abundance per sample (row).
+# Input data is expected to be frequency/count data and will be automatically converted to relative abundance.
+			
+# Outputs a 3-column table with SPECIES, RANK, ABUNDANCE calculated from the entire matrix by default.
+# If the -method row option is toggled, rank abundance is calculated per sample (by row) and outputs a 4th
+# column in the table for SAMPLE.
+			
+# NOTE: this is similar to, but not the same, as computing the rank per cell of the matrix. (use $ rank for doing that computation).
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+
+sub usage {
+	my $usage = "rank_abundance.pl v0.1.0\n
+	PURPOSE: Calculates a rank abundance curve using the marginal distributions of the input data matrix (as incidence data).
+			Requires an input OTU abundance table with samples as rows and OTUs as columns.
+			Can also be toggled to compute rank abundance per sample (row).
+			Input data is expected to be frequency/count data and will be automatically converted to relative abundance.
+			
+			Outputs a 3-column table with OTU, RANK, ABUNDANCE calculated from the entire matrix by default.
+			If the -method row option is toggled, rank abundance is calculated per sample (by row) and outputs a 4th
+			column in the table for SAMPLE.
+			
+			NOTE: this is similar to, but not the same, as computing the rank per cell of the matrix. (use \$ rank for doing that computation).
+	\n
+	USAGE:	rank_abundance.pl v0.1.0 -i otu.abundance.tab -o ranks.tab
+	-i		input OTU abudance matrix, as frequency/count data
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate the rank abundance curve (either cumulative [Default] or row).
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /row/ )? "row" : "cumulative";
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+if ( $cns == 1 )	{
+	if ( $method eq "row" )		{ 	print $fhout "OTU\tRANK\tABUNDANCE\tSAMPLE\n";		}
+	else 						{	print $fhout "OTU\tRANK\tABUNDANCE\n";				}
+}
+
+# Operate on the matrix line-by-line
+my @incidence;
+my @headers;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, just print our singple header
+	if ( $cns == 1 && $. == 1 )		{
+		@headers = split("$sep", $_);
+		next;
+	}
+	
+	# Now operate on the rows
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	
+	# Convert each row's data into relative abundance, as a decimal "percent"
+	my $sum = sum (@row);
+	if ( $method eq "row" )		{
+		my @abundances;
+		for ( my $i=0; $i < scalar @row; $i++ )		{		
+			push @abundances, ( $sum == 0 )? 0 : sprintf("%3.4f", $row[$i] / $sum);	
+		}
+		my ( $abundances, $indices ) = sort_two_lists( @abundances );
+		for ( my $j=0; $j < scalar @{$abundances}; $j++ )	{
+			if ( $rns == 1 )	{		print $fhout join("$sep", $headers[ $indices->[$j] ], $j+1, $abundances->[$j], $rowname), "\n";			}
+			else				{		print $fhout join("$sep", $headers[ $indices->[$j] ], $j+1, $abundances->[$j], "Sample$j"), "\n";		}
+		}
+	}
+	else 	{
+		for ( my $i=0; $i < scalar @row; $i++ )		{
+			$incidence[$i] += $row[$i];
+		}
+	}
+}
+close $fh if ( $succin );
+
+# If we are calculating the global rank abundance from incidence data:
+if ( $method eq "cumulative" )	{
+	my %Row = ();
+	my $sum = sum( @incidence );
+	my @abundances;
+	for ( my $i=0; $i < scalar @incidence; $i++ )		{		
+		push @abundances, ( $sum == 0 )? 0 : sprintf("%3.4f", $incidence[$i] / $sum);	
+	}
+	my ( $abundances, $indices ) = sort_two_lists( @abundances );
+	for ( my $j=0; $j < scalar @{$abundances}; $j++ )	{
+		print $fhout join("$sep", $headers[ $indices->[$j] ], $j+1, $abundances->[$j]), "\n";
+	}
+}
+close $fhout if ( $succout );
+exit;
+
+################################ SUBROUTINES ######################################
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+# The below code generates a sorted list of values AND sorted array indices
+# It is rather ugly code, but it works
+sub sort_two_lists	{
+	my ( @sample ) = @_;
+	my $j=0;
+	my @tmp_abunds = map { {value => $_, index => $j++} } @sample;
+	my @sorted_temp_abunds = sort { $b->{value} <=> $a->{value} } @tmp_abunds;
+	my @sorted_abunds = map { $_->{value} } @sorted_temp_abunds;
+	my @sorted_indices = map { $_->{index} } @sorted_temp_abunds;
+	return ( \@sorted_abunds, \@sorted_indices );
+}

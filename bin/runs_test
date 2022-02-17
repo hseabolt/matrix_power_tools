@@ -1,0 +1,330 @@
+#!/usr/bin/perl
+
+# runs_test.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Computes a runs test from an input numeric list of data.
+# Runs are coded using the mean (default) or median of the input data.
+# Output is in TABLE format with the following columns:  	N   N+  N-  Obs  Exp  Variance  Z-score  P-value  Significance
+# Alpha = 0.05 for significance testing
+
+# Note: If input data is given as a matrix, all elements will be unwrapped into a single list.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use List::Util qw(shuffle);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $method;
+my $nrepet = 1;
+
+sub usage {
+	my $usage = "runs_test.pl v0.1.0\n
+	PURPOSE: Computes a runs test from an input numeric list of data.
+			Runs are coded using the mean (default) or median of the input data.
+			Output is in TABLE format with the following columns:
+			N   N+  N-  Obs  Exp  Variance  Zscore  Pvalue  Significance
+			
+			Note: If input data is given as a matrix, all elements will be unwrapped into a single list.
+	\n
+	USAGE:	runs_test.pl v0.1.0 -i data.list -o runs_testA.list
+	-i		input numeric data (can be piped in from STDIN)
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; method to calculate statistics (either mean [Default] or median).
+	-n 		INT; number of randomized resampling iterations to compute? ( Default: 1 )
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+			'nrepet|n=i' => \$nrepet,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /(?im)median/ )? "median" : "mean";
+$nrepet = ( $nrepet >= 1 )? $nrepet : 1;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Print the header line if we are using it
+print $fhout join("$sep", "Iter", "N", "N+", "N-", "Obs", "Exp", "Stdev", "Zscore", "p-value", "Significance"), "\n" if ( $cns == 1 );
+
+##################################################################################
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @P;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+		push @rownames, $rowname;
+	}
+
+	# Add all elements (in order) to the list @P
+	push @P, $_ foreach (@row);
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Encode each element in @P as "+" or "-" depending on if its value
+my $mean = mean(@P);
+my $median = median(@P);
+
+my @encoded;
+my %Runs = ( "N+" => 0, "N-" => 0, "obs" => 1);
+for ( my $i=0; $i < scalar @P; $i++ )	{
+	# encode the element
+	if ( $method eq "mean" ) 	{
+		$encoded[$i] = ( $P[$i] <= $mean )? "+" : "-";
+	}
+	elsif ( $method eq "median" )	{
+		$encoded[$i] = ( $P[$i] <= $median )? "+" : "-";
+	}
+	( $encoded[$i] eq "+" )? $Runs{"N+"}++ : $Runs{"N-"}++;
+	
+	# Increment the number of obs runs if $encoded[$i] != $encoded[$i-1];
+	$Runs{"obs"}++ if ( $i >= 1 && $encoded[$i] ne $encoded[$i-1] );
+}
+
+##################################################################################
+# Calculate expected number of runs and variance s^2 under the null hypothesis that the elements are i.i.d. and produced in a random manner.
+# Does NOT assume that + and - have equal probability of occuring.
+my $N = $Runs{"N+"} + $Runs{"N-"};
+my $expected = int(1 + ( (2*$Runs{"N+"}*$Runs{"N-"}) / $N ));
+my $variance = ( (($expected-1)*($expected-2)) / ($N-1) );
+
+# Calculate the z-score (obs - expected/stdev)
+# Sanity check --> does $variance == 0 ?
+my $z = ( $variance == 0 )? "<NA>" : ( $Runs{"obs"} - $expected ) / sqrt($variance);
+
+# Calculate p-value from z-scores (this is a two-tailed Z-test)
+# Formula for p-value: p = 2 * phi( |z| ) )
+my $p = ( $z eq "<NA>" )? "<NA>" : 2 * phi(-$z);
+
+# Generate a silly little significance marker
+my $sig = "";
+if    ( $p <= 0.05  )	{	$sig = "*";		}
+elsif ( $p <= 0.01  )	{	$sig = "**";	}
+elsif ( $p <= 0.001 )	{	$sig = "***";	}
+
+my @trueR = ( $Runs{"obs"}, $N, $Runs{"N+"}, $Runs{"N-"}, sprintf("%3.0f",$expected), sprintf("%3.4f",sqrt($variance)), sprintf("%3.4f",$z), sprintf("%3.6f", $p), $sig);
+my $R = $Runs{"obs"};
+
+##################################################################################
+# Compute the randomization test --> this will produce a randomized distribution
+# centered around the mean of the null hypothesis ($expected) and have variance $variance.
+# To compute a psuedo p-value from this null distribution, divide the number of recomputed I statistics
+# that are greater than or equal to the "true" I computed above, and divide this total by the number of permutations.
+my $r = 1;
+my @Rs;
+while ( $r < $nrepet )		{
+	
+	# Randomize the order of the input data
+	@P = shuffle( @P );
+	
+	my @encoded;
+	my %Runs = ( "N+" => 0, "N-" => 0, "obs" => 1);
+	for ( my $i=0; $i < scalar @P; $i++ )	{
+		# encode the element
+		if ( $method eq "mean" ) 	{
+			$encoded[$i] = ( $P[$i] <= $mean )? "+" : "-";
+		}
+		elsif ( $method eq "median" )	{
+			$encoded[$i] = ( $P[$i] <= $median )? "+" : "-";
+		}
+		( $encoded[$i] eq "+" )? $Runs{"N+"}++ : $Runs{"N-"}++;
+		
+		# Increment the number of obs runs if $encoded[$i] != $encoded[$i-1];
+		$Runs{"obs"}++ if ( $i >= 1 && $encoded[$i] ne $encoded[$i-1] );
+	}
+
+	##################################################################################
+	# Calculate expected number of runs and variance s^2 under the null hypothesis that the elements are i.i.d. and produced in a random manner.
+	# Does NOT assume that + and - have equal probability of occuring.
+	my $N = $Runs{"N+"} + $Runs{"N-"};
+	my $expected = int(1 + ( (2*$Runs{"N+"}*$Runs{"N-"}) / $N ));
+	my $variance = ( (($expected-1)*($expected-2)) / ($N-1) );
+
+	# Calculate the z-score (obs - expected/stdev)
+	# Sanity check --> does $variance == 0 ?
+	my $z = ( $variance == 0 )? "<NA>" : ( $Runs{"obs"} - $expected ) / sqrt($variance);
+
+	# Calculate p-value from z-scores (this is a two-tailed Z-test)
+	# Formula for p-value: p = 2 * phi( |z| ) )
+	my $p = ( $z eq "<NA>" )? "<NA>" : 2 * phi(-$z);
+
+	# Generate a silly little significance marker
+	my $sig = "";
+	if    ( $p <= 0.05  )	{	$sig = "*";		}
+	elsif ( $p <= 0.01  )	{	$sig = "**";	}
+	elsif ( $p <= 0.001 )	{	$sig = "***";	}
+
+	my @iteration = ( $Runs{"obs"}, $N, $Runs{"N+"}, $Runs{"N-"}, $expected, sqrt($variance), $z, $p, $sig );
+	push @Rs, \@iteration; 
+	print $fhout join("$sep", $r, $Runs{"obs"}, $N, $Runs{"N+"}, $Runs{"N-"}, sprintf("%3.0f",$expected), sprintf("%3.4f",sqrt($variance)), sprintf("%3.4f",$z), sprintf("%3.6f", $p), $sig), "\n";
+	$r++;
+}
+
+##################################################################################
+# Print the results
+print $fhout join("$sep", "OBS", @trueR), "\n";
+
+# Compute the average values from the randomized bootstraps
+if ( $nrepet > 1 )	{
+	@Rs = @{ transpose(@Rs) };
+	my $mean_exp = mean(@{$Rs[0]});
+	
+	# Compute the sample stdev from the reference distribution 
+	# Formula can be found here: https://webfocusinfocenter.informationbuilders.com/wfappent/TL5s/TL_lang/source/stddev.htm
+	# This is a sample, not a population, so the 1/N divisor is actually N-1
+	my $residuals = 0;
+	for ( my $i=0; $i < scalar @{$Rs[0]}; $i++ )	{
+		$residuals += ($Rs[0]->[$i] - $mean_exp)**2
+	}
+	my $stdev = sqrt( (1/(scalar @{$Rs[0]})) * $residuals );
+	
+	# Calculate the z-score from the reference distribution and the observed I statistic
+	my $final_z = ($stdev == 0 )? "<NA>" : ( $trueR[0] - $mean_exp ) / $stdev;
+	
+	# Calculate the pseudo p-value
+	my $final_p = ( $z eq "<NA>" )? "<NA>" : 2 * phi(-$z);
+
+	my $final_sig = "";
+	if    ( $final_p <= 0.05  )	{	$final_sig = "*";	}
+	elsif ( $final_p <= 0.01  )	{	$final_sig = "**";	}
+	elsif ( $final_p <= 0.001 )	{	$final_sig = "***";	}
+
+	# Print output results
+	print $fhout join("$sep", "RAND", $R, $N, $Runs{"N+"}, $Runs{"N-"}, sprintf("%3.0f", $mean_exp), sprintf("%3.4f",$stdev), sprintf("%3.4f",$final_z), sprintf("%3.6f",$final_p), $final_sig), "\n";
+}
+close $fhout if ( $succout );
+
+exit;
+
+######################### SUBROUTINES ##################################
+
+
+sub mean	{ 	
+	return sum(@_)/@_;
+}
+
+sub sum	{
+	my ( @data ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @data );	
+	return $sum;
+}
+
+sub median {
+    my ( @list ) = @_;
+	my @data = ( scalar @_ == 0 )? return 0 : sort { $a <=> $b } @list;
+    if ( scalar(@data) % 2 ) {
+        return ( $data[ @data / 2 ] );
+    } 
+    else {
+        my ( $upper, $lower );
+        $lower = $data[ @data / 2 ];
+        $upper = $data[ @data / 2 - 1 ];
+        return ( ($lower + $upper)/2 );
+    }
+}
+
+# Part of this calculation comes from CPAN Math::Gauss.  Credit where credit is due, although their formula is incorrect ;)
+sub phi		{
+	my ( $zscore ) = @_;
+	
+	my $t = 1.0/(1.0 + 0.2316419*abs($zscore));
+	my $y = $t*(0.319381530
+			+ $t*(-0.356563782
+				+ $t*(1.781477937
+					+ $t*(-1.821255978
+						+ $t*1.330274429 ))));
+		
+	 return pdf( $zscore )*$y;
+}
+
+
+
+sub pdf {
+	my ( $u ) = @_;
+	my $SQRT2PI = 2.50662827463;
+	# return exp( -0.5 * $u*$u ) / ($SQRT2PI * sqrt($variance));		# <-- Keeping this line commented out for records.  Math::Gauss uses this line, but it incorrectly includes the sqrt variance term.
+	return exp( -0.5 * $u*$u ) / $SQRT2PI;
+}
+
+# Tranpose a matrix
+sub transpose		{
+	my ( @matrix ) = @_;
+	my $matrix_t = [ ];
+	for ( my $i=0; $i < scalar @matrix; $i++ )	{
+		for ( my $j=0; $j < scalar @{$matrix[0]}; $j++ )	{
+		$matrix_t->[$j]->[$i] = $matrix[$i]->[$j];
+		}
+	}	
+	return $matrix_t;
+}

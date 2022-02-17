@@ -1,0 +1,161 @@
+#!/usr/bin/perl
+
+# rowNames.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Prints the row names of an incoming data matrix.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $new_rns;
+my $sep;
+my $add;
+my $drop;
+
+sub usage {
+	my $usage = "rowNames.pl\n
+	PURPOSE: Prints the row names of an incoming data matrix.
+	\n
+	USAGE:	rowNames.pl -i NxM.tab -o names.txt
+	-i		input matrix file
+	-o 		output file name
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+	-replace 	(Optional) list of new row names to assign to the incoming matrix (can be given as a csv list or as a file with one row name per line)
+	-add 		(Optional) list of new row names to add to the incoming matrix (can be given as a csv list or as a file with one row name per line)
+				-add is incompatible with -replace.
+	-drop		(Optional) drops *ALL* row names and outputs bare rows of data.
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'replace=s' => \$new_rns,
+			'sep|s=s' => \$sep,
+			'add=s' => \$add,
+			'drop' => \$drop,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$drop = ( $drop ) ? 1 : 0;
+
+# Get the new column names if we have them, either from -replace or -add (Preference is given to -replace)
+my @new_rowNames;
+if ( $add && -e $add )	{
+	open(LIST, "$add") or die "$!\n";
+		@new_rowNames = <LIST>;
+	close LIST;
+}
+elsif ( $add )	{
+	@new_rowNames = split(",", $add);
+}
+if ( $new_rns && -e $new_rns )	{
+	open(LIST, "$rns") or die "$!\n";
+		@new_rowNames = <LIST>;
+	close LIST;
+}
+elsif ( $new_rns )	{
+	@new_rowNames = split(",", $new_rns);
+}
+chomp $_ foreach (@new_rowNames);
+
+##################################################################################
+# Read the input data file, expecting a matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Construct a 2D AoA matrix from the incoming data
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Handle column names
+	if ( $cns == 1 && $. == 1 )		{
+		print $fhout "$_\n";
+		next;
+	}
+	
+	# Split the row
+	my @row = split("$sep", $_);
+	
+	# If we want to replace the row names with new ones
+	if ( ($new_rns || $add) && scalar @new_rowNames > 0 )		{
+		if ( $add )		{
+			my $new_rowname = shift @new_rowNames;
+			unshift @row, $new_rowname;
+		}
+		else	{
+			$row[0] = shift @new_rowNames;
+		}
+		print $fhout join("$sep", @row), "\n";
+	}
+	elsif ( $drop == 1 )	{
+		shift @row;
+		print $fhout join("$sep", @row), "\n";
+	}
+	# If we run out of new row names and there are still incoming lines of data, throw an error
+	elsif ( $new_rns && scalar @new_rowNames == 0 )		{
+		warn "ERROR:: The number of new row names for assignment exceeds the number of rows!  Revise and re-run your pipeline.\n";
+		last;
+	}
+	# If we just want to check the existing row names, just print those as we go through the incoming stream
+	else	{
+		next if ( $cns == 1 && $. == 1 );
+		my @row = split("$sep", $_);
+		print $fhout "$row[0]\n";
+	}
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;
+
+
+
+

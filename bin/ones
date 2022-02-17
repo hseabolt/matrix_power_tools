@@ -1,0 +1,111 @@
+#!/usr/bin/perl
+
+# ones.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Generates a matrix of a given size, populated with ones.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns;
+my $rns;
+my $sep;
+
+sub usage {
+	my $usage = "ones.pl\n
+	PURPOSE: Generates a matrix of a given size, populated with ones.
+	\n
+	USAGE:	ones.pl -r 3 -c 4 -o matrix.tab
+	-r 		INT; number of rows [ Default: 1 ]
+	-c 		INT; number of columns [ Default: 1 ]
+	-o 		output file name
+	-s 		STR; input data separator ( Default: tab )
+\n";
+	print $usage;
+}
+
+GetOptions(	'out|o=s' => \$output,
+			'ncols|c=i' => \$cns,
+			'nrows|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$cns= ( $cns && $cns >= 1 )? $cns : 1;
+$rns = ( $rns && $rns >= 1)? $rns : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Generate the new matrix
+my @M = ();
+for ( my $i=0; $i < $rns; $i++ )	{
+	for ( my $j=0; $j < $cns; $j++ )	{
+		$M[$i]->[$j] = 1;
+	}
+	print $fhout join("$sep", @{$M[$i]}), "\n";
+}
+
+exit;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

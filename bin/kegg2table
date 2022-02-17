@@ -1,0 +1,154 @@
+#!/usr/bin/perl
+
+# kegg2table.pl v0.1.0
+# Author: MH Seabolt
+
+# SYNOPSIS:
+# Accepts a KEGG tree, parses and reformats the data into a table format for easy matching against KEGG terms attached to genes annotated with other software.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use Scalar::Util qw(looks_like_number);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+
+sub usage {
+	my $usage = "kegg2table.pl\n
+	PURPOSE: Accepts a KEGG tree, parses and reformats the data into a table format for easy matching against KEGG terms attached to genes annotated with other software.
+			
+	\n
+	USAGE:	kegg2table.pl -i ko00001.keg -o keggs.tab
+	-i		input KEGG tree file
+	-o 		output file name
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+) or die usage();
+
+# Parameter setups
+my %Levels = ( "A" => 0, "B" => 1, "C" => 2, "D" => 3, "EC" => 4, "NAME" => 5 );
+
+##################################################################################
+# Read the input data file, expecting a KEGG heirarchy tree
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Set output filehandles
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;			}
+else				{	$fhout = *STDOUT;		}
+
+# Parse!
+my @Table;
+my @kegg_tree = ( "-", "-", "-", "-", "-" );
+my @name_tree = ( "-", "-", "-", "-" );
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Skip lines that do not begin with A,B,C, or D
+	next if ( $_ !~ /^[ABCD]/ );
+	
+	# Split the row -- this works a tad differently for A-levels vs. B,C, or D-levels
+	my @data;
+	if ( $_ =~ /^A/ )	{
+		@data = split('', $_);
+		shift @data;
+		my $pathway = join('', @data);
+		my @pathway = split(/\s+/, $pathway);
+		@data = ( "A", @pathway );
+	}
+	else 	{
+		@data = split(/\s+/, $_);
+	}
+	next if ( scalar @data == 1 );
+	
+	# Build the parent tree
+	my $level = shift @data; my $kegg = shift @data;
+	warn "kegg2table::WARNING --> unrecognized level $level encountered! URK!!!!\n" if ( not exists $Levels{$level} );
+	
+	# Set the name in a formatted style similar to Kraken and Metaphlan
+	my $namestr = join("_", @data);
+	for ( my $j=0; $j < scalar @name_tree; $j++ )	{
+		if ( $j < $Levels{$level} ) {
+			next;
+		}
+		elsif ( $j == $Levels{$level} )		{
+			$name_tree[$j] = (lc $level) . "__" . $namestr;
+		}
+		else 	{
+			$name_tree[$j] = "";
+		}
+	}
+	$kegg_tree[ $Levels{"NAME"} ] = join('|', @name_tree);
+	$kegg_tree[ $Levels{"NAME"} ] =~ s/\|+$//g;			# Hate having to do this, but oh well it works.
+	
+	# If-else decision based on the level:
+	# For any level, zero out all lower levels in both @level_tree and @kegg_tree
+	for ( my $i=0; $i < scalar @kegg_tree; $i++ )	{
+		if ( $i < $Levels{$level} ) {
+			next;
+		}
+		elsif ( $i == $Levels{$level} )		{
+			$kegg_tree[$i] = $kegg;
+		}
+		else 	{
+			$kegg_tree[$i] = "-" if ( $i < $Levels{$level} );
+		}
+	}
+	
+	# Set the EC terms
+	my $meta = join(" ", @data);
+	$meta =~ /\[([EC|PATH].*)\]/;
+	my $ec = $1;
+	if ( $ec && $ec =~ /^EC/ )	{	
+		$ec =~ s/ / EC:/g;
+		my @ec = split(" ", $ec);
+		foreach my $term ( @ec )	{
+			$kegg_tree[ $Levels{"EC"} ] = $term;
+			print $fhout join("\t", @kegg_tree), "\n";
+		}
+	}
+	else 	{
+		print $fhout join("\t", @kegg_tree), "\n";
+	}
+}
+close $fh if ( $succin );
+close $fhout if ( $succout );
+
+exit;

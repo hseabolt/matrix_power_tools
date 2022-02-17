@@ -1,0 +1,176 @@
+#!/usr/bin/perl
+
+# polyas_urn.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Initialize and simulate a stochastic Polya's Urn model with N different colored balls and their associated starting frequency counts.
+# Input is expected to be in "table" format with 2 columns per line, the element name and the frequency count.
+# Given an positive INT number of trials to run, outputs a table with the results per trial.
+
+# *NOTE*: This algorithm is a generalized Urn model for N different colored balls.  Only use two colors/categories (e.g. X and "not-X" 
+# if you want to simulate	the classic Urn that follows the Beta-binomial or Beta martingale distributions.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+use List::Util qw(shuffle);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $trials;
+
+sub usage {
+	my $usage = "polyas_urn.pl v0.1.0\n
+	PURPOSE:  Initialize and simulate a stochastic Polya's Urn model with N different colored balls and their associated starting frequency counts.
+			Input is expected to be in \"table\" format with 2 columns per line, the element name and the frequency count.
+			Given an positive INT number of trials to run, outputs a table with the results per trial.
+
+			*NOTE*: This algorithm is a generalized Urn model for N different colored balls.  Only use two colors/categories (e.g. X and \"not-X\" 
+			if you want to simulate	the classic Urn that follows the Beta-binomial or Beta martingale distributions.
+	\n
+	USAGE:	polyas_urn.pl v0.1.0 -i data.tab -n trials -o urn.tab
+	-i		input table with 2-columns
+	-o 		output file name
+	-c 		INT flag; input matrix contains column headers? ( Default: ON )
+	-r 		INT flag; input matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator ( Default: tab )
+	-n 		INT; number of resampling trials to compute? ( Default: 1000 );
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'trials|n=i' => \$trials,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$trials = ( $trials && $trials >= 1 )? $trials : 1000;
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @data;
+my %Urn;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# Process column headers if they are marked as present
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	
+	# Process rows --> expecting the first non-rowname element to be 
+	# the category "ball color" and the 2nd element to be the corresponding frequency.
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}
+	$Urn{$row[0]} = $row[1];
+	push @data, $row[0] foreach ( 1..$row[1] );
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Print a header line and the starting data "Trial 0"
+print $fhout join("$sep", "Trial", "Random_Element", sort keys %Urn, "Urn_Total"), "\n";
+my @trial0 = ( 0, "<NA>" );
+push @trial0, $Urn{$_} foreach ( sort keys %Urn );
+push @trial0, sum( values %Urn );
+print $fhout join("$sep", @trial0), "\n";
+
+##################################################################################
+# Begin the stochastic trials, which proceed as follows:
+#  -- shuffle the list elements
+#  -- choose an element at random and note its "color"
+#  -- add a additional ball of the same color to the list
+my $i=1;
+while ( $i <= $trials )		{
+
+	# Shuffle the list elements at the beginning of each trial
+	@data = shuffle @data;
+	
+	# Randomly select an element from the list and note its color
+	my $ball = $data[ int(rand(scalar @data)) ];
+	$Urn{$ball}++;
+	
+	# Add a new ball of the same color to the urn
+	push @data, $ball;
+	
+	# Print a summary of this trial
+	my @current_trial = ( $i, $ball );
+	push @current_trial, $Urn{$_} foreach ( sort keys %Urn );
+	push @current_trial, sum( values %Urn );
+	print $fhout join("$sep", @current_trial), "\n";
+	
+	# Increment $i
+	$i++;
+}
+close $fhout if ( $succout );
+
+exit;
+
+################################## SUBROUTINES ###########################################
+
+# Calculates the sum of a list
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

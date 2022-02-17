@@ -1,0 +1,149 @@
+#!/usr/bin/perl
+
+# minor.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Calculates a minor matrix Mjk by deleting the *j*-th row and *k*-th row.
+# Note: this program does NOT calculate the determinant of the resulting matrix!
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $j;
+my $k;
+
+sub usage {
+	my $usage = "minor.pl v0.1.0\n
+	PURPOSE: Calculates a minor matrix Mij by deleting the *i*-th row and *j*-th row.
+	Note: this program does NOT calculate the determinant of the resulting matrix!
+
+	\n
+	USAGE:	minor -i data.tab -o minor.tab
+	-i		input numeric data matrix
+	-o 		output file name 
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-j 		INT; row index to delete
+	-k 		INT; col index to delete
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'j=s' => \$j,
+			'k=s' => \$k,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns == 0 )? 0 : 1;
+$rns = ( $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$j = ( $j && $j >= 0 )? $j : "inf";
+$k = ( $k && $k >= 0 )? $k : "inf";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @colnames;
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+##################################################################################
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @P;
+my $nrows = 0;
+my $ncols = 0;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@colnames = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	my $rowname;
+	if ( $rns == 1 )	{
+		$rowname = shift @row;
+		push @rownames, $rowname;
+	}
+	push @P, \@row;
+	$nrows++;
+}
+close $fh if ( $succin );
+
+# Sanity check --> were $j and $k provided and are they compatible with this matrix?
+$ncols = scalar @{$P[0]};
+die "minor::ERROR --> cannot compute minor matrix Mjk -- j or k index either not provided or incompatible with these dimensions ($nrows,$ncols)\n" unless ( $j && $k && $j <= $nrows && $k <= $ncols );
+
+##################################################################################
+if ( $cns == 1 )	{
+	splice(@colnames, $k, 1);
+	print join("$sep", @colnames), "\n";
+}
+for ( my $m=0; $m < scalar @P; $m++ )	{
+	next if ( $m == $j );
+	my @minor;
+	for ( my $n=0; $n < scalar @{$P[0]}; $n++ )		{
+		push @minor, $P[$m]->[$n] if ( $n != $k );
+	}
+	if ( $rns == 1 )		{ 	print $fhout join("$sep", $rownames[$m], @minor), "\n";		}
+	else 					{ 	print $fhout join("$sep", @minor), "\n";					}
+}
+
+
+
+
+
+
+close $fhout if ( $succout );
+
+exit;

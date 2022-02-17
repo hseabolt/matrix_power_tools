@@ -1,0 +1,184 @@
+#!/usr/bin/perl
+
+# perplexity.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-18-2021
+
+# SYNOPSIS
+# Calculates the perplexity PP of a discrete random variable, given as an input numeric data matrix.
+# Requires that the data be numeric and representative of frequencies/counts.
+# By default, the output is expressed in units of nats and is treats each row in the matrix as a unique random variable,
+# which can be toggled to treat the entire matrix cumulatively as the random variable.
+
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns;
+my $rns;
+my $sep;
+my $method;
+my $base;
+
+sub usage {
+	my $usage = "perplexity.pl v0.1.0\n
+	PURPOSE: Calculates the perplexity PP of a discrete random variable, given as an input numeric data matrix.
+			Requires that the data be numeric and representative of frequencies/counts.
+			By default, the output is expressed in units of nats and is treats each row in the matrix as a unique random variable,
+			which can be toggled to treat the entire matrix cumulatively as the random variable.
+			
+	\n
+	USAGE:	perplexity.pl v0.1.0 -i matrix.tab -o perplexity.tab
+	-i		input matrix file in TAB format.
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-m 		STR; axis to calculate perplexity (either row [Default] or cumulative).
+	-b 		INT; base of the logarithm to compute? ( Default: natural log, base e )    
+\n";
+	print $usage;
+}
+
+GetOptions(	'input|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'method|m=s' => \$method,
+			'base|b=i' => \$base,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$method = ( $method && $method =~ /cum/ )? "cumulative" : "row";
+$base = ( $base && $base > 0 )? $base : "e";
+
+my $e = 2.7182818284;
+
+##################################################################################
+# Read the input data file, expecting a tabular matrix with headers and columns
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Open the output filehand
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+
+# Operate on the matrix line-by-line
+my @cumulative;
+while ( <$fh> )		{
+	chomp $_;
+	
+	# If we have column headers, just print our singple header
+	if ( $cns == 1 && $. == 1 )	{
+		print $fhout "PP\n";
+		next;
+	}
+	
+	# Now operate on the rows
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	
+	if ( $method ne "cumulative" )	{
+		if ( $rns == 1 )	{	
+			if ( $base eq "e" )	{	print $fhout "$rowname", "$sep", exp(Shannon( @row )), "\n";	}
+			else 				{	print $fhout "$rowname", "$sep", $base**Shannon( @row ), "\n";	}
+		}
+		else 				{	
+			if ( $base eq "e" )	{	print $fhout exp(Shannon( @row )), "\n";	}
+			else 				{	print $fhout $base**Shannon( @row ), "\n";	}
+		}
+	}
+	else 	{
+		for ( my $i=0; $i < scalar @row; $i++ )	{
+			$cumulative[$i] += $row[$i];
+		}
+	}
+}
+close $fh if ( $succin );
+
+# Print the cumulative Entropy if this was requested
+if ( $method eq "cumulative" )	{
+	if ( $rns == 1 )	{	
+		if ( $base eq "e" )	{	print $fhout "Cumulative", "$sep", exp(Shannon( @cumulative )), "\n";	}
+		else 				{	print $fhout "Cumulative", "$sep", $base**Shannon( @cumulative ), "\n";	}
+	}
+	else 				{	
+		if ( $base eq "e" )	{	print $fhout exp(Shannon( @cumulative )), "\n";	}
+		else 				{	print $fhout $base**Shannon( @cumulative ), "\n";	}
+	}
+}
+close $fhout if ( $succout );
+exit;
+
+
+#################################### SUBROUTINES ##################################
+
+# Calculates Shannon Entropy H'
+sub Shannon		{
+	my ( @sample ) = @_;
+	
+	# Error handling: return 0 values if $N is zero
+	my $N = sum( @sample );
+	return ( 0 ) if ( $N == 0 );		
+	
+	# Calculate *p* for each species *i* <-- this can be thought of as relative abundance, but this is only one way to estimate that measure
+	my @pis;
+	for ( my $i=0; $i < scalar @sample; $i++ )	{
+		$pis[$i] = ( $sample[$i] == 0 )? 0 : ($sample[$i]/$N) * logX(($sample[$i]/$N), $base);
+	}
+
+	# Sum @pis and multiply by -1
+	my $H = -( sum(@pis) );
+	return $H;
+}
+
+sub logX	{
+	my ( $operand, $base ) = @_;
+	if ( $base eq "e" )		{		( $operand == 0 )? return "nan" : return log($operand);						}
+	else					{		( $operand == 0 )? return "nan" : return log($operand) / log($base);		}
+}
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}

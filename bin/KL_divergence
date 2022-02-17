@@ -1,0 +1,174 @@
+#!/usr/bin/perl
+
+# KL_divergence.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Calculates the Kullback-Leibler Divergence (aka relative entropy) DKL(P|Q) between two probability distributions, given as two input matrices P and Q.
+# Note: the output values are expressed in units of nats (natural log base).
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input1 = "--";
+my $input2;
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+
+sub usage {
+	my $usage = "KL_divergence.pl v0.1.0\n
+	PURPOSE: Calculates the Kullback-Leibler Divergence (aka relative entropy) DKL(P|Q) between two probability distributions, given as two input matrices P and Q.
+			Requires that the data be numeric and representative of frequencies/counts and both matrices must be formatted the same (e.g. with headers, rownames)
+			Note: the output values are expressed in units of nats (natural log base).
+			
+	\n
+	USAGE:	KL_divergence.pl v0.1.0 -P data1.tab -Q data2.tab -o KLD.tab
+	-P		first input matrix
+	-Q 		second input matrix, formatted the same as the first matrix and containing homologous data per cell with the first matrix.
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+\n";
+	print $usage;
+}
+
+GetOptions(	'1|P=s' => \$input1, 
+			'2|Q=s' => \$input2,
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX1, "<", "$input1") if ( $input1 ne "--" && -e $input1 );
+$fh = *MATRIX1 if ( $succin ); 
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @p_marginal;
+my $p_sum = 0;
+while ( <$fh> )		{
+	chomp $_;
+	next if ( $cns == 1 && $. == 1 );
+	my @row = split("$sep", $_);
+	my $rowname = shift @row if ( $rns == 1 );
+	my $row_sum = sum(@row);
+	push @p_marginal, $row_sum;
+	$p_sum += $row_sum;
+}
+close $fh if ( $succin );
+
+##################################################################################
+# Read the second matrix, which must come from a file and have the same formatting as the first matrix
+open(MATRIX2, "<", "$input2" ) or die "mutual_information::FATAL ERROR with 2nd input file $input2 --> $!\n";
+	my @data2 = <MATRIX2>;
+close MATRIX2;
+
+# Operate on the matrix line-by-line
+my @q_marginal;
+my $q_sum = 0;
+for ( my $i=0; $i < scalar @data2; $i++ )	{
+	chomp $data2[$i];
+	next if ( $cns == 1 && $i == 0 );		# The header line
+	my @row = split("$sep", $data2[$i]);
+	my $rowname = shift @row if ( $rns == 1 );
+	my $row_sum = sum(@row);
+	push @q_marginal, $row_sum;
+	$q_sum += $row_sum;
+}
+
+##################################################################################
+# Calculate the KL Divergence from marginal distributions and the natural log
+
+# Calculate the marginal distribution for both matrices, confirm they are the same size
+$_ /= $p_sum foreach (@p_marginal);
+$_ /= $q_sum foreach (@q_marginal);
+die "KL_divergence::FATAL ERROR --> Marginal distributions do not have the same dimensions!\n" if ( scalar @p_marginal != scalar @q_marginal );
+
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+print $fhout "KL_divergence\n" if ( $cns == 1 );
+
+# Calculate the DKL summation
+my $DKL = 0;
+for ( my $x=0; $x < scalar @p_marginal; $x++ )		{
+	$DKL += $p_marginal[$x] * log($p_marginal[$x] / $q_marginal[$x]);
+}
+if ( $rns == 1 )	{	print $fhout "KLD", "$sep", "$DKL\n";		}
+else 				{ 	print $fhout "$DKL\n";						}
+close $fhout if ( $succout );
+exit;
+
+
+#################################### SUBROUTINES ##################################
+
+# Calculates Shannon Entropy H'
+sub alpha_diversity_Shannon		{
+	my ( @sample ) = @_;
+	
+	# Error handling: return NA values if $N is zero
+	my $N = sum( @sample );
+	return ( "NA" ) if ( $N == 0 );		
+	
+	# Calculate *p* for each species *i* <-- this can be thought of as relative abundance, but this is only one way to estimate that measure
+	my @pis;
+	for ( my $i=0; $i < scalar @sample; $i++ )	{
+		$pis[$i] = ( $sample[$i] == 0 )? 0 : ($sample[$i]/$N) * log($sample[$i]/$N);
+	}
+
+	# Sum @pis and multiply by -1
+	my $H = -( sum(@pis) );
+	return $H;
+}
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+

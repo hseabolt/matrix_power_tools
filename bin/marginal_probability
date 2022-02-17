@@ -1,0 +1,163 @@
+#!/usr/bin/perl
+
+# marginal_probability.pl v0.1.0
+# Author: MH Seabolt
+# Last updated: 8-21-2021
+
+# SYNOPSIS
+# Calculates marginal PROBABILITY distribution along one axis of a numeric data matrix (either rows or columns).
+# This program is an alias for marginal_distribution.
+
+##################################################################################
+# The MIT License
+#
+# Copyright (c) 2021 Matthew H. Seabolt
+#
+# Permission is hereby granted, free of charge, 
+# to any person obtaining a copy of this software and 
+# associated documentation files (the "Software"), to 
+# deal in the Software without restriction, including 
+# without limitation the rights to use, copy, modify, 
+# merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom 
+# the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice 
+# shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##################################################################################
+
+use strict;
+use warnings;
+use Getopt::Long qw(GetOptions);
+
+# GetOpts Variable declarations
+my $input = "--";
+my $output = "--";
+my $cns = 1;
+my $rns = 1;
+my $sep;
+my $outfmt;
+my $axis;
+
+sub usage {
+	my $usage = "marginal_probability.pl v0.1.0\n
+	PURPOSE: Calculates marginal PROBABILITY distribution along one axis of a numeric data matrix (either rows or columns).
+			This program is an alias for marginal_distribution.
+			
+	\n
+	USAGE:	marginal_probability.pl v0.1.0 -i data.tab -o marginal_probability.tab
+	-i		first input matrix P
+	-o 		output file name ( do not include extensions! )
+	-c 		INT flag; matrix contains column headers? ( Default: ON )
+	-r 		INT flag; matrix contains row names? ( Default: ON )
+	-s 		STR; input data separator. ( Default: tab )
+	-f 		STR; output format, either fraction or float.  ( Default: float )
+	-a		STR; axis to compute the marginal distribution over, either rows or cols.
+\n";
+	print $usage;
+}
+
+GetOptions(	'in|i=s' => \$input, 
+			'out|o=s' => \$output,
+			'colnames|c=i' => \$cns,
+			'rownames|r=i' => \$rns,
+			'sep|s=s' => \$sep,
+			'outfmt|f=s' =>\ $outfmt,
+			'axis|a=s' => \$axis,
+) or die usage();
+
+# Parameter setups
+$cns = ( $cns && $cns == 0 )? 0 : 1;
+$rns = ( $rns && $rns == 0 )? 0 : 1;
+$sep = ( $sep && $sep ne "\t" )? $sep : "\t";
+$outfmt = ( $outfmt && $outfmt =~ /(?im)fraction/ )? "fraction" : "float";
+$axis = ( $axis && $axis =~ /(?im)col/ )? "col" : "row";
+
+
+##################################################################################
+# Read the first input data file
+my $fh = *STDIN;
+my $succin = open(MATRIX, "<", "$input") if ( $input ne "--" && -e $input );
+$fh = *MATRIX if ( $succin ); 
+
+# Initialize a vector for rownames
+my @rownames;
+my @headers;
+
+# Operate on the matrix line-by-line (here we are skipping column headers and rownames, if they are marked as being present
+my @M;
+my $sum_total = 0;
+while ( <$fh> )		{
+	chomp $_;
+	if ( $cns == 1 && $. == 1 )		{
+		@headers = split("$sep", $_);
+		next;
+	}
+	my @row = split("$sep", $_);
+	if ( $rns == 1 )	{
+		my $rowname = shift @row;
+		push @rownames, $rowname;
+	}
+	$sum_total += sum(@row);
+	push @M, \@row;
+}
+close $fh if ( $succin );
+
+# Transpose the matrix if we want the marginal distribution of the columns
+if ( $axis eq "col" )	{
+	@M = @{ transpose(@M) };
+	@rownames = @headers;
+}
+
+##################################################################################
+# Open the output filehandle
+my $succout = open( OUT, ">", "$output" ) if $output ne "--";
+my $fhout;
+if ( $succout )		{	$fhout = *OUT;		}
+else				{	$fhout = *STDOUT;	}
+print $fhout "Probability\n" if ( $cns == 1 );	
+
+# Compute the marginal distibution across the (possible now transposed) rows
+for ( my $i=0; $i < scalar @M; $i++ )	{
+	my $rowsum = sum( @{$M[$i]} );
+	if ( $rns == 1 )	{
+		if ( $outfmt eq "float" ) 	{	print $fhout "$rownames[$i]$sep", $rowsum / $sum_total, "\n";		}
+		else 						{ 	print $fhout "$rownames[$i]$sep", "$rowsum", "/", "$sum_total\n";	}
+	}	
+	else	{
+		if ( $outfmt eq "float" ) 	{	print $fhout $rowsum / $sum_total, "\n";		}
+		else 						{ 	print $fhout "$rowsum", "/", "$sum_total\n";	}
+	}
+}
+close $fhout if ( $succout );
+exit;
+
+#################################### SUBROUTINES ##################################
+
+sub sum		{
+	my ( @list ) = @_;
+	my $sum = 0;
+	$sum += $_ foreach ( @list );
+	return $sum;
+}
+
+# Transpose
+sub transpose	{
+	my ( @M ) = @_;
+	my $matrix_t = [ ];
+	for ( my $i=0; $i < scalar @M; $i++ )	{
+		for ( my $j=0; $j < scalar @{$M[0]}; $j++ )	{
+			$matrix_t->[$j]->[$i] = $M[$i]->[$j];
+		}
+	}
+	return $matrix_t;
+}
